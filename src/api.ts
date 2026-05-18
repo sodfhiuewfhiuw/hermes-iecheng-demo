@@ -8,6 +8,27 @@ export const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
 
+const DEV_SESSION_KEY = 'hermes-dev-session-111';
+const DEV_TOKEN = 'dev-local-token-111';
+
+function makeDevSession(): Session {
+  return {
+    access_token: DEV_TOKEN,
+    refresh_token: 'dev-refresh-token-111',
+    expires_in: 60 * 60 * 24,
+    expires_at: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
+    token_type: 'bearer',
+    user: {
+      id: 'dev-user-111',
+      app_metadata: {},
+      user_metadata: {},
+      aud: 'authenticated',
+      created_at: new Date().toISOString(),
+      email: '111',
+    },
+  } as Session;
+}
+
 export interface StatusResponse {
   aiConnected: boolean;
   model: string;
@@ -282,9 +303,9 @@ function toScriptData(script: any, params?: ScriptParams): ScriptData {
 }
 
 export const authApi = {
-  supabaseConfigured: () => Boolean(supabase),
+  supabaseConfigured: () => true,
   getSession: async (): Promise<Session | null> => {
-    if (!supabase) return null;
+    if (!supabase) return localStorage.getItem(DEV_SESSION_KEY) === '1' ? makeDevSession() : null;
     const { data } = await supabase.auth.getSession();
     return data.session;
   },
@@ -294,18 +315,30 @@ export const authApi = {
     return data.subscription;
   },
   signIn: async (email: string, password: string) => {
-    if (!supabase) throw new Error('Supabase 尚未設定，請先設定 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY。');
+    if (!supabase) {
+      if (email !== '111' || password !== '111') throw new Error('本機測試帳號密碼都是 111。');
+      localStorage.setItem(DEV_SESSION_KEY, '1');
+      return makeDevSession();
+    }
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     return data.session;
   },
   signUp: async (email: string, password: string) => {
-    if (!supabase) throw new Error('Supabase 尚未設定，請先設定 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY。');
+    if (!supabase) {
+      if (email !== '111' || password !== '111') throw new Error('本機測試帳號密碼都是 111。');
+      localStorage.setItem(DEV_SESSION_KEY, '1');
+      return makeDevSession();
+    }
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
     return data.session;
   },
   signOut: async () => {
+    if (!supabase) {
+      localStorage.removeItem(DEV_SESSION_KEY);
+      return;
+    }
     if (supabase) await supabase.auth.signOut();
   },
 };

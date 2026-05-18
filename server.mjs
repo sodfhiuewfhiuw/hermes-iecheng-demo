@@ -67,6 +67,22 @@ const supabaseAdmin = supabaseConfigured()
   })
   : null;
 
+const DEV_TOKEN = 'dev-local-token-111';
+const localStore = {
+  workspace: { id: 'local-workspace-111', name: 'HERMES Local Room', role: 'owner' },
+  rooms: new Map(),
+  states: new Map(),
+  messages: new Map(),
+  documents: new Map(),
+  memories: new Map(),
+  drafts: new Map(),
+  agentRuns: [],
+};
+
+function makeId(prefix) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function sendJson(res, status, data) {
   res.writeHead(status, { ...corsHeaders, 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data));
@@ -91,11 +107,16 @@ function requireSupabaseReady() {
 }
 
 async function requireUser(req) {
-  requireSupabaseReady();
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) {
     const error = new Error('Missing Authorization bearer token');
+    error.status = 401;
+    throw error;
+  }
+  if (!supabaseAdmin) {
+    if (token === DEV_TOKEN) return { id: 'dev-user-111', email: '111' };
+    const error = new Error('Invalid local dev token');
     error.status = 401;
     throw error;
   }
@@ -109,6 +130,8 @@ async function requireUser(req) {
 }
 
 async function ensureWorkspaceForUser(user) {
+  if (!supabaseAdmin) return localStore.workspace;
+
   const { data: membership, error: membershipError } = await supabaseAdmin
     .from('workspace_members')
     .select('workspace_id, role, workspaces(id, name, owner_id)')
@@ -142,6 +165,24 @@ async function ensureWorkspaceForUser(user) {
 
 async function loadRoomContext(user, roomId) {
   const workspace = await ensureWorkspaceForUser(user);
+  if (!supabaseAdmin) {
+    const room = localStore.rooms.get(roomId);
+    if (!room) {
+      const error = new Error('Room not found or not in local workspace');
+      error.status = 404;
+      throw error;
+    }
+    return {
+      workspace,
+      room,
+      state: localStore.states.get(roomId) || normalizeRoomState(null, roomId, workspace.id),
+      messages: localStore.messages.get(roomId) || [],
+      documents: (localStore.documents.get(roomId) || []).filter((item) => !item.deleted_at),
+      memories: (localStore.memories.get(roomId) || []).filter((item) => !item.deleted_at),
+      drafts: localStore.drafts.get(roomId) || [],
+    };
+  }
+
   const { data: room, error: roomError } = await supabaseAdmin
     .from('rooms')
     .select('*')
@@ -368,6 +409,23 @@ async function runRoomMessagePipeline(context, content) {
 }
 
 async function insertAgentRun(context, stage, inputSnapshot, outputSnapshot, status = 'success', error = null, userMessageId = null) {
+  if (!supabaseAdmin) {
+    localStore.agentRuns.push({
+      id: makeId('run'),
+      workspace_id: context.workspace.id,
+      room_id: context.room.id,
+      user_message_id: userMessageId,
+      stage,
+      input_snapshot: inputSnapshot || {},
+      output_snapshot: outputSnapshot || {},
+      model: OPENAI_MODEL,
+      status,
+      error,
+      created_at: new Date().toISOString(),
+    });
+    return;
+  }
+
   await supabaseAdmin.from('agent_runs').insert({
     workspace_id: context.workspace.id,
     room_id: context.room.id,
@@ -385,6 +443,26 @@ async function handleCreateRoom(req, res) {
   const user = await requireUser(req);
   const body = await readJson(req);
   const workspace = await ensureWorkspaceForUser(user);
+  if (!supabaseAdmin) {
+    const room = {
+      id: makeId('room'),
+      workspace_id: workspace.id,
+      title: body.title || 'HERMES 小房間',
+      created_by: user.id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const state = normalizeRoomState(null, room.id, workspace.id);
+    localStore.rooms.set(room.id, room);
+    localStore.states.set(room.id, state);
+    localStore.messages.set(room.id, []);
+    localStore.documents.set(room.id, []);
+    localStore.memories.set(room.id, []);
+    localStore.drafts.set(room.id, []);
+    sendJson(res, 200, { workspace, room, state, messages: [], documents: [], memories: [], drafts: [] });
+    return;
+  }
+
   const { data: room, error: roomError } = await supabaseAdmin
     .from('rooms')
     .insert({ workspace_id: workspace.id, title: body.title || 'HERMES 小房間', created_by: user.id })
@@ -408,6 +486,40 @@ async function handleRoomMessage(req, res, roomId) {
   const context = await loadRoomContext(user, roomId);
   const content = String(body.content || '').trim();
   if (!content) throw new Error('Message content is required');
+
+  if (!supabaseAdmin) {
+    const messages = localStore.messages.get(roomId) || [];
+    const userMessage = {
+      id: makeId('msg'),
+      workspace_id: context.workspace.id,
+      room_id: roomId,
+      role: 'user',
+      content,
+      output_type: 'chat',
+      metadata: {},
+      created_at: new Date().toISOString(),
+    };
+    messages.push(userMessage);
+    const result = await runRoomMessagePipeline({ ...context, messages }, content);
+    await insertAgentRun(context, 'classify_intent', { content }, result.intent, 'success', null, userMessage.id);
+    await insertAgentRun(context, 'distill_voice_dna', { content }, result.state.voiceDna, 'success', null, userMessage.id);
+    localStore.states.set(roomId, result.state);
+    const assistant = {
+      id: makeId('msg'),
+      workspace_id: context.workspace.id,
+      room_id: roomId,
+      role: 'assistant',
+      content: result.assistantMessage.content,
+      output_type: result.assistantMessage.outputType,
+      metadata: result.assistantMessage.metadata,
+      created_at: new Date().toISOString(),
+    };
+    messages.push(assistant);
+    localStore.messages.set(roomId, messages);
+    const updated = await loadRoomContext(user, roomId);
+    sendJson(res, 200, { userMessage, assistantMessage: assistant, ...updated });
+    return;
+  }
 
   const { data: userMessage, error: messageError } = await supabaseAdmin
     .from('room_messages')
@@ -462,6 +574,38 @@ async function handleLearnText(req, res, roomId) {
     audience: [],
     tone: [],
   }, 0.4);
+
+  if (!supabaseAdmin) {
+    const doc = {
+      id: makeId('doc'),
+      workspace_id: context.workspace.id,
+      room_id: roomId,
+      title: body.title || '文字匯入資料',
+      source_type: 'manual_text',
+      summary: summaryResult.summary || text.slice(0, 180),
+      deleted_at: null,
+      created_at: new Date().toISOString(),
+    };
+    const docs = localStore.documents.get(roomId) || [];
+    docs.unshift(doc);
+    localStore.documents.set(roomId, docs);
+
+    const messages = localStore.messages.get(roomId) || [];
+    messages.push({
+      id: makeId('msg'),
+      workspace_id: context.workspace.id,
+      room_id: roomId,
+      role: 'assistant',
+      output_type: 'chat',
+      content: `已學習這份文字素材。摘要：${summaryResult.summary || '已建立可檢索素材。'}`,
+      metadata: { documentId: doc.id, summaryResult },
+      created_at: new Date().toISOString(),
+    });
+    localStore.messages.set(roomId, messages);
+    await insertAgentRun(context, 'learn_text', { documentId: doc.id }, summaryResult);
+    sendJson(res, 200, { document: doc, chunks: chunkText(text).length, summary: summaryResult });
+    return;
+  }
 
   const { data: doc, error: docError } = await supabaseAdmin
     .from('documents')
@@ -521,6 +665,68 @@ async function handleGenerateRoomScript(req, res, roomId) {
   };
 
   const script = await generateHermesScript(input);
+
+  if (!supabaseAdmin) {
+    const draft = {
+      id: makeId('draft'),
+      workspace_id: context.workspace.id,
+      room_id: roomId,
+      status: 'draft',
+      platform: input.params.platform,
+      purpose: input.params.purpose,
+      script_style: input.params.scriptStyle,
+      duration_seconds: input.params.durationSeconds,
+      roles: input.params.roles || [],
+      tones: input.params.tones || [],
+      rehearsal_preview: script.rehearsalPreview || [],
+      real_lines: script.realLines || [],
+      story_beats: script.storyBeats || {},
+      blocks: script.blocks || [],
+      citations: script.citations || [],
+      quality_check: script.qualityCheck || {},
+      human_speech_check: script.humanSpeechCheck || {},
+      publish_pack: script.publishPack || {},
+      created_at: new Date().toISOString(),
+    };
+    const drafts = localStore.drafts.get(roomId) || [];
+    drafts.unshift(draft);
+    localStore.drafts.set(roomId, drafts);
+
+    const nextState = {
+      ...context.state,
+      currentStage: 'script_drafted',
+      voiceDna: script.voiceDna || context.state.voiceDna,
+      latestRehearsal: script.rehearsalPreview || [],
+      realLines: script.realLines || [],
+      storyBeats: script.storyBeats || {},
+      lastQualityCheck: script.humanSpeechCheck || script.qualityCheck || {},
+      activeScriptDraftId: draft.id,
+      updatedAt: new Date().toISOString(),
+    };
+    localStore.states.set(roomId, nextState);
+
+    const messages = localStore.messages.get(roomId) || [];
+    messages.push({
+      id: makeId('msg'),
+      workspace_id: context.workspace.id,
+      room_id: roomId,
+      role: 'assistant',
+      output_type: 'script',
+      content: script.hermesJudgement || '已產出 HERMES 小房間腳本草稿。',
+      metadata: { draftId: draft.id, script },
+      created_at: new Date().toISOString(),
+    });
+    localStore.messages.set(roomId, messages);
+
+    for (const stage of ['simulate_scene', 'extract_real_lines', 'build_story_beats', 'draft_script', 'human_speech_check']) {
+      await insertAgentRun(context, stage, input, { stage, draftId: draft.id, script });
+    }
+
+    const updated = await loadRoomContext(user, roomId);
+    sendJson(res, 200, { draft, script, ...updated });
+    return;
+  }
+
   const { data: draft, error: draftError } = await supabaseAdmin
     .from('script_drafts')
     .insert({
@@ -580,6 +786,15 @@ async function handleSoftDelete(req, res, roomId, table) {
   const context = await loadRoomContext(user, roomId);
   const id = body.id;
   if (!id) throw new Error('id is required');
+  if (!supabaseAdmin) {
+    const key = table === 'memories' ? 'memories' : 'documents';
+    const list = localStore[key].get(roomId) || [];
+    const target = list.find((item) => item.id === id);
+    if (target) target.deleted_at = new Date().toISOString();
+    localStore[key].set(roomId, list);
+    sendJson(res, 200, { deleted: true, id });
+    return;
+  }
   const { error } = await supabaseAdmin
     .from(table)
     .update({ deleted_at: new Date().toISOString() })
