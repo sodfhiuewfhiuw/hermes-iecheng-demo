@@ -246,7 +246,7 @@ const defaultPersona: PersonaData = {
   tones: ['自然口語', '專業可信', '台灣在地感'],
   platforms: ['Instagram Reels', 'YouTube Shorts', 'TikTok/抖音'],
   forbiddenWords: '不保證流量、成交或營收；不恐嚇式行銷；不把未提供的功能講成事實。',
-  ctaMethod: '把現有素材丟進 HERMES 小房間，先跑一版真人互動腳本。',
+  ctaMethod: '想先看你的素材可以怎麼變成可拍的短影音腳本，私訊我「短影音腳本」，IE程先幫你抓一版方向。',
   ctaGoal: '引導私訊或留下資料',
   ctaKeyword: '腳本',
   ctaStrength: '中',
@@ -471,7 +471,7 @@ export const api = {
     } catch {
       return [
         '想把你的短影音方向整理清楚，可以先私訊「腳本」。',
-        '把現有素材丟進 HERMES 小房間，先跑一版真人互動腳本。',
+        '想先看你的素材可以怎麼變成可拍的短影音腳本，私訊我「短影音腳本」，IE程先幫你抓一版方向。',
         '如果你不想再寫出公關稿，先讓 IE程 幫你拆一版。',
       ];
     }

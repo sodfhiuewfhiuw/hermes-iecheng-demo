@@ -215,7 +215,7 @@ function buildFallbackScript(input) {
   const materials = collectMaterials(input);
   const roles = defaultRoles(params);
   const source = materials[0]?.text || '目前素材不足，請先貼品牌介紹、客戶對話或 TG 腳本範例。';
-  const cta = persona.ctaMethod || persona.ctaKeyword || '想看你的短影音可以怎麼拍，私訊我「短影音腳本」。';
+  const cta = sanitizeCta(persona.ctaMethod || persona.ctaKeyword || '想看你的短影音可以怎麼拍，私訊我「短影音腳本」。', persona.brandName);
   const citations = materials.map((item, index) => `source_id=local_${index + 1}; document_title=${item.title}; chunk_id=chunk_${index + 1}; workspace_id=local-workspace-111`);
 
   return {
@@ -342,16 +342,46 @@ function normalizeScriptOutput(raw, fallback) {
   };
 }
 
+function normalizeBrandName(brandName) {
+  if (!brandName || typeof brandName !== 'string') return 'IE程';
+  if (/IE\?|IE蝔/.test(brandName)) return 'IE程';
+  return brandName;
+}
+
 function stabilizeBrandName(value, brandName) {
-  if (!brandName) return value;
+  const safeBrandName = normalizeBrandName(brandName);
   if (typeof value === 'string') {
     return value
-      .replace(/\bIE\?/g, brandName)
-      .replace(/\bIE蝔\?/g, brandName);
+      .replace(/IE\s?程/g, safeBrandName)
+      .replace(/IE\?/g, safeBrandName)
+      .replace(/IE蝔\?/g, safeBrandName)
+      .replace(/IE蝔/g, safeBrandName);
   }
   if (Array.isArray(value)) return value.map((item) => stabilizeBrandName(item, brandName));
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, stabilizeBrandName(item, brandName)]));
+  }
+  return value;
+}
+
+function sanitizeCta(value, brandName = 'IE程') {
+  const safeBrandName = normalizeBrandName(brandName);
+  if (!value || typeof value !== 'string') return value;
+  const fallback = `想先看你的素材可以怎麼變成可拍的短影音腳本，私訊我「短影音腳本」，${safeBrandName} 先幫你抓一版方向。`;
+  if (/小房間|丟進|丟素材|跑一版真人互動腳本/i.test(value)) return fallback;
+  return value
+    .replace(/HERMES 小房間/g, safeBrandName)
+    .replace(/HERMES小房間/g, safeBrandName)
+    .replace(/小房間/g, safeBrandName)
+    .replace(/IE\s?程/g, safeBrandName)
+    .replace(/IE\?/g, safeBrandName);
+}
+
+function sanitizeScriptCta(value, brandName) {
+  if (typeof value === 'string') return sanitizeCta(value, brandName);
+  if (Array.isArray(value)) return value.map((item) => sanitizeScriptCta(item, brandName));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeScriptCta(item, brandName)]));
   }
   return value;
 }
@@ -372,7 +402,8 @@ async function generateScript(input) {
       }),
     },
   ], fallback, 0.9);
-  return stabilizeBrandName(normalizeScriptOutput(raw, fallback), input?.persona?.brandName);
+  const brandName = input?.persona?.brandName;
+  return sanitizeScriptCta(stabilizeBrandName(normalizeScriptOutput(raw, fallback), brandName), brandName);
 }
 
 async function replyToMessage(context, content) {
@@ -476,7 +507,7 @@ async function handleGenerateScript(req, roomId) {
 async function handleSuggest(req, type) {
   const body = await readJson(req);
   const brand = body.persona?.brandName || '你的品牌';
-  return { suggestions: type === 'cta' ? [`想把 ${brand} 的短影音方向整理清楚，先私訊「腳本」。`, '想看這支可以怎麼拍，丟素材給我，我先拆一版。'] : ['不保證流量、成交或營收', '不使用恐嚇式行銷', '不把未提供的功能講成事實'] };
+  return { suggestions: type === 'cta' ? [`想把 ${brand} 的短影音方向整理清楚，先私訊「腳本」。`, `想先看這支可以怎麼拍，私訊「短影音腳本」，${brand} 先幫你抓一版方向。`] : ['不保證流量、成交或營收', '不使用恐嚇式行銷', '不把未提供的功能講成事實'] };
 }
 
 async function handleLegacyLearn(req) {
