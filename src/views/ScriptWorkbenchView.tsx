@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAppContext } from '../store/AppContext';
-import { ScriptParams } from '../api';
+import { ScriptParams, StoryBeats } from '../api';
 import { BrainCircuit, CheckCircle2, Clock, FileText, Globe2, MessageSquare, RefreshCw, ShieldCheck, Target, Users, Volume2, Wand2 } from 'lucide-react';
 
 const PLATFORM_OPTIONS = ['Reels', 'TikTok/抖音', 'YouTube Shorts', 'Facebook Reels', '多平台'];
 const PURPOSE_OPTIONS = ['曝光', '建立信任', '教育教學', '破除誤解', '引導私訊', '成交轉換', '活動宣傳', '品牌記憶點'];
 const SCRIPT_STYLE_OPTIONS = ['單人口播', '雙人對話', '三人討論', '店員客人互動', '街訪問答', '情境短劇', '一人分飾兩角', '老闆藏鏡人拆解'];
 const TONE_OPTIONS = ['自然口語', '專業可信', '生活感', '幽默吐槽', '溫柔陪伴', '犀利分析', '台灣在地感', '更強 CTA'];
-const REWRITE_ACTIONS = ['增加互動衝突', '更口語一點', '更像短影音', '加強開場鉤子', '更犀利', '加強 CTA'];
+const REWRITE_ACTIONS = ['重跑模擬現場', '增加互動衝突', '更口語一點', '更像短影音', '加強開場鉤子', '加強 CTA'];
 
 function defaultRolesForStyle(style: string) {
   switch (style) {
@@ -42,6 +42,17 @@ function qualityEntries(check?: any) {
   ];
 }
 
+function beatEntries(beats?: StoryBeats) {
+  if (!beats) return [];
+  return [
+    ['Hook', beats.hook],
+    ['推進', beats.setup],
+    ['衝突', beats.conflict],
+    ['轉折', beats.turningPoint],
+    ['收尾', beats.ending],
+  ].filter(([, value]) => Boolean(value));
+}
+
 export const ScriptWorkbenchView: React.FC = () => {
   const { generateScript, rewriteScript, addMemory, scripts, persona, learnedUrls, setActiveView } = useAppContext();
   const [params, setParams] = useState<ScriptParams>({
@@ -59,6 +70,7 @@ export const ScriptWorkbenchView: React.FC = () => {
   const currentScript = scripts[0];
   const roleText = params.roles.join('、');
   const qualityList = useMemo(() => qualityEntries(currentScript?.qualityCheck), [currentScript?.qualityCheck]);
+  const storyBeatList = useMemo(() => beatEntries(currentScript?.storyBeats), [currentScript?.storyBeats]);
 
   useEffect(() => {
     if (persona?.tones?.length) {
@@ -115,12 +127,12 @@ export const ScriptWorkbenchView: React.FC = () => {
       <header className="view-header flow-header">
         <div>
           <h1 className="view-title">IE程 產出工作台</h1>
-          <p className="view-subtitle">先用 workspace 品牌資料抓事實，再可選擇公開資訊補市場現況、受眾與熱門內容角度。</p>
+          <p className="view-subtitle">已接入原始 HERMES「先模擬再成稿」流程：先逼真人句，再剪成故事骨架，最後才出拍攝腳本。</p>
         </div>
         <div className="flow-pills">
           <span>1 人設</span>
           <span>2 學習</span>
-          <span className="active">3 產出</span>
+          <span className="active">3 模擬成稿</span>
         </div>
       </header>
 
@@ -147,7 +159,7 @@ export const ScriptWorkbenchView: React.FC = () => {
             <select className="input-field" value={params.scriptStyle} onChange={(event) => updateScriptStyle(event.target.value)}>
               {SCRIPT_STYLE_OPTIONS.map((style) => <option key={style}>{style}</option>)}
             </select>
-            <p className="field-hint">多人腳本會強制使用角色互動，不會只給單人口播。</p>
+            <p className="field-hint">多人腳本會先模擬現場，再剪對話，不會直接變成資訊口播。</p>
           </div>
 
           <div className="form-group">
@@ -184,12 +196,12 @@ export const ScriptWorkbenchView: React.FC = () => {
             >
               {params.usePublicResearch ? '已啟用公開產業查詢' : '不查公開資訊'}
             </button>
-            <p className="field-hint">開啟後只查公開資訊，補產業現況、受眾訊號與熱門內容角度；品牌事實仍以 workspace 資料為主。</p>
+            <p className="field-hint">開啟後只補市場現況、受眾訊號與熱門內容角度；品牌事實仍以 workspace 資料為主。</p>
           </div>
 
           <button className="btn btn-primary full-width" onClick={handleGenerate} disabled={isGenerating}>
             {isGenerating ? <RefreshCw size={16} className="animate-spin" /> : <Wand2 size={16} />}
-            {isGenerating ? 'IE程 產出中...' : '讓 IE程 產出'}
+            {isGenerating ? 'IE程 模擬中...' : '讓 IE程 先模擬再成稿'}
           </button>
         </aside>
 
@@ -202,7 +214,7 @@ export const ScriptWorkbenchView: React.FC = () => {
                 <div className="preflight-item complete">角色：{roleText}</div>
               </div>
               <MessageSquare size={40} />
-              <p>選擇腳本形式與角色後，IE程 會依資料產出單人口播、雙人對話、三人討論或情境短劇。</p>
+              <p>按下產出後，IE程 會先模擬現場對話，抓真人句，再剪成短影音腳本。</p>
               {learnedUrls.length <= 1 && (
                 <button className="btn btn-secondary btn-sm" type="button" onClick={() => setActiveView('learn-url')}>
                   先去 IE程 學習室
@@ -229,6 +241,43 @@ export const ScriptWorkbenchView: React.FC = () => {
                   <p>{currentScript.safetyCheck || '未加入未提供的成效保證。'}</p>
                 </div>
               </div>
+
+              {currentScript.rehearsalPreview && currentScript.rehearsalPreview.length > 0 && (
+                <div className="card script-card">
+                  <div className="section-label">1 模擬現場</div>
+                  <div className="script-block-list">
+                    {currentScript.rehearsalPreview.map((line, index) => (
+                      <div className="script-block" key={`${line.speaker}-${index}`}>
+                        <div className="script-row"><strong>{line.speaker}</strong><span>{line.line}</span></div>
+                        {line.purpose ? <div className="script-row"><strong>目的</strong><span>{line.purpose}</span></div> : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {currentScript.realLines && currentScript.realLines.length > 0 && (
+                <div className="card quality-card">
+                  <div className="section-label">2 真人句</div>
+                  <div className="chip-row">
+                    {currentScript.realLines.map((line) => <span className="badge" key={line}>{line}</span>)}
+                  </div>
+                </div>
+              )}
+
+              {storyBeatList.length > 0 && (
+                <div className="card quality-card">
+                  <div className="section-label">3 故事骨架</div>
+                  <div className="quality-grid">
+                    {storyBeatList.map(([label, value]) => (
+                      <div className="quality-item" key={label}>
+                        <strong>{label}</strong>
+                        <span>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {currentScript.publicResearch && (
                 <div className="card quality-card">
@@ -258,7 +307,7 @@ export const ScriptWorkbenchView: React.FC = () => {
               <div className="card script-card">
                 <div className="script-card-header">
                   <div>
-                    <h2 className="card-header">IE程 草稿</h2>
+                    <h2 className="card-header">4 完整拍攝版</h2>
                     <div className="chip-row">
                       <span className="badge">{currentScript.platform}</span>
                       <span className="badge">{currentScript.purpose}</span>
@@ -281,6 +330,16 @@ export const ScriptWorkbenchView: React.FC = () => {
                     </div>
                   ))}
                 </div>
+
+                {currentScript.publishPack && (
+                  <div className="citation-box">
+                    <div className="section-label">5 上片版</div>
+                    {currentScript.publishPack.title ? <p>標題：{currentScript.publishPack.title}</p> : null}
+                    {currentScript.publishPack.subtitleFirstLine ? <p>字幕第一句：{currentScript.publishPack.subtitleFirstLine}</p> : null}
+                    {currentScript.publishPack.cta ? <p>CTA：{currentScript.publishPack.cta}</p> : null}
+                    {currentScript.publishPack.hashtags?.length ? <p>{currentScript.publishPack.hashtags.join(' ')}</p> : null}
+                  </div>
+                )}
 
                 {currentScript.citations && currentScript.citations.length > 0 && (
                   <div className="citation-box">

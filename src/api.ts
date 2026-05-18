@@ -61,6 +61,36 @@ export interface QualityCheck {
   risk: string;
 }
 
+export interface PublicResearch {
+  industrySnapshot?: string;
+  audienceSignals?: string[];
+  popularAngles?: string[];
+  platformNotes?: string[];
+  riskNotes?: string[];
+  sources?: string[];
+}
+
+export interface RehearsalLine {
+  speaker: string;
+  line: string;
+  purpose?: string;
+}
+
+export interface StoryBeats {
+  hook?: string;
+  setup?: string;
+  conflict?: string;
+  turningPoint?: string;
+  ending?: string;
+}
+
+export interface PublishPack {
+  title?: string;
+  subtitleFirstLine?: string;
+  cta?: string;
+  hashtags?: string[];
+}
+
 export interface ScriptData {
   id: string;
   platform: string;
@@ -77,14 +107,11 @@ export interface ScriptData {
   missingInfo?: string;
   safetyCheck?: string;
   citations?: string[];
-  publicResearch?: {
-    industrySnapshot?: string;
-    audienceSignals?: string[];
-    popularAngles?: string[];
-    platformNotes?: string[];
-    riskNotes?: string[];
-    sources?: string[];
-  } | null;
+  publicResearch?: PublicResearch | null;
+  rehearsalPreview?: RehearsalLine[];
+  realLines?: string[];
+  storyBeats?: StoryBeats;
+  publishPack?: PublishPack;
   qualityCheck?: QualityCheck;
 }
 
@@ -100,7 +127,11 @@ interface HermesScriptResponse {
   missingInfo?: string;
   safetyCheck?: string;
   citations?: string[];
-  publicResearch?: ScriptData['publicResearch'];
+  publicResearch?: PublicResearch | null;
+  rehearsalPreview?: RehearsalLine[];
+  realLines?: string[];
+  storyBeats?: StoryBeats;
+  publishPack?: PublishPack;
   qualityCheck?: QualityCheck;
   blocks?: ScriptBlock[];
 }
@@ -171,6 +202,10 @@ function fallbackScriptError(reason: string): HermesScriptResponse {
     missingInfo: '缺少穩定的 AI 回應，請稍後重試。',
     safetyCheck: '已進入 fallback，沒有使用外部資料，也沒有寫入 core。',
     citations: [],
+    rehearsalPreview: [{ speaker: '系統', line: reason, purpose: '錯誤訊息' }],
+    realLines: [],
+    storyBeats: {},
+    publishPack: {},
     qualityCheck: {
       hook: '風險：這是 fallback，不代表完整腳本品質。',
       interaction: '風險：沒有取得 AI 角色互動判斷。',
@@ -205,15 +240,9 @@ function localLearningFallback(input: { url?: string; text?: string }): UrlLearn
   const text = input.text || input.url || '';
   return {
     id: sourceId,
-    background: text
-      ? '已把使用者提供的文字整理成 workspace 學習資料，可供後續腳本與文案使用。'
-      : '尚未提供可學習的文字內容。',
-    highlights: text
-      ? '可用素材包含品牌定位、服務說明、觀眾痛點、內容主題與 CTA 線索。'
-      : '目前沒有足夠資料可整理成素材。',
-    audience: currentPersona.tones.length
-      ? `目前語氣可依人設設定：${currentPersona.tones.join('、')}。`
-      : '目前文本不足以判斷完整品牌語氣。',
+    background: text ? '已把使用者提供的文字整理成 workspace 學習資料，可供後續腳本與文案使用。' : '尚未提供可學習的文字內容。',
+    highlights: text ? '可用素材包含品牌定位、服務說明、觀眾痛點、內容主題與 CTA 線索。' : '目前沒有足夠資料可整理成素材。',
+    audience: currentPersona.tones.length ? `目前語氣可依人設設定：${currentPersona.tones.join('、')}。` : '目前文本不足以判斷完整品牌語氣。',
     painPoints: `source_id=${sourceId}; document_title=文字匯入資料; chunk_id=chunk_001; workspace_id=demo-workspace-room`,
     topics: '文字匯入 / 品牌資料 / 短影音素材',
     sellingPoints: '可產出短影音腳本、社群貼文、FAQ、銷售話術與 CTA；若要更準，請補案例、價格、限制與常見問題。',
@@ -225,13 +254,13 @@ export const api = {
   getStatus: async (): Promise<StatusResponse> => {
     const aiStatus = await getServerStatus();
     return {
-      coreVersion: 'IE程 Demo Core v0.2',
+      coreVersion: 'IE程 Demo Core v0.3',
       runtime: aiStatus?.aiConnected ? 'real AI via local server' : 'mock fallback',
       coreMutable: false,
       auth: aiStatus?.aiConnected ? 'local API key loaded server-side' : 'API key not loaded',
       workspaceId: 'demo-workspace-room',
-      isolationMode: 'workspace text learning',
-      sourceArtifact: 'IE程 short-video script operator prompt',
+      isolationMode: 'workspace facts + simulate-first story engine',
+      sourceArtifact: 'IE程 simulate-first short-video operator prompt',
       aiConnected: aiStatus?.aiConnected ?? false,
       aiModel: aiStatus?.model,
     };
@@ -251,9 +280,7 @@ export const api = {
   suggestCta: async (data: Partial<PersonaData>) => {
     try {
       const result = await postJson<{ suggestions: string[] }>('/api/suggest-cta', { persona: data });
-      return result?.suggestions?.length ? result.suggestions : [
-        '想知道你的短影音卡在哪裡，私訊「短影音健檢」，IE程先幫你抓出一個最該修的問題。',
-      ];
+      return result?.suggestions?.length ? result.suggestions : ['想知道你的短影音卡在哪裡，私訊「短影音健檢」。'];
     } catch {
       return [
         '想知道你的短影音卡在哪裡，私訊「短影音健檢」，IE程先幫你抓出一個最該修的問題。',
@@ -265,16 +292,9 @@ export const api = {
   suggestBoundaries: async (data: Partial<PersonaData>) => {
     try {
       const result = await postJson<{ suggestions: string[] }>('/api/suggest-boundaries', { persona: data });
-      return result?.suggestions?.length ? result.suggestions : [
-        '不保證流量、成交或業績結果。',
-        '不編造案例、價格或數據。',
-      ];
+      return result?.suggestions?.length ? result.suggestions : ['不保證流量、成交或業績結果。', '不編造案例、價格或數據。'];
     } catch {
-      return [
-        '不保證流量、成交或業績結果。',
-        '不使用恐嚇式行銷或過度焦慮語氣。',
-        '沒有案例、數據或價格時，不自行編造。',
-      ];
+      return ['不保證流量、成交或業績結果。', '不使用恐嚇式行銷或過度焦慮語氣。', '沒有案例、數據或價格時，不自行編造。'];
     }
   },
 
@@ -341,6 +361,10 @@ export const api = {
       safetyCheck: result.safetyCheck,
       citations: markDeletedCitations(result.citations),
       publicResearch: result.publicResearch,
+      rehearsalPreview: result.rehearsalPreview,
+      realLines: result.realLines,
+      storyBeats: result.storyBeats,
+      publishPack: result.publishPack,
       qualityCheck: result.qualityCheck,
     };
     scriptsLibrary = [newScript, ...scriptsLibrary];
@@ -364,6 +388,10 @@ export const api = {
       createdAt: new Date().toISOString(),
       blocks: result.blocks?.length ? result.blocks : script.blocks,
       hermesJudgement: result.hermesJudgement || script.hermesJudgement,
+      rehearsalPreview: result.rehearsalPreview || script.rehearsalPreview,
+      realLines: result.realLines || script.realLines,
+      storyBeats: result.storyBeats || script.storyBeats,
+      publishPack: result.publishPack || script.publishPack,
       qualityCheck: result.qualityCheck || script.qualityCheck,
     };
     scriptsLibrary = [rewrittenScript, ...scriptsLibrary];
