@@ -274,6 +274,95 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
   return response.json() as Promise<T>;
 }
 
+function displayText(value: unknown, fallback = ''): string {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map((item) => displayText(item)).filter(Boolean).join('、') || fallback;
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => `${key}: ${displayText(item)}`)
+      .filter(Boolean)
+      .join('\n') || fallback;
+  }
+  return fallback;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => displayText(item)).filter(Boolean);
+}
+
+function normalizeBlocks(value: unknown): ScriptBlock[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((block) => block && typeof block === 'object')
+    .map((block, index) => {
+      const item = block as Record<string, unknown>;
+      return {
+        time: displayText(item.time || item.timestamp, `${index * 5}-${(index + 1) * 5} 秒`),
+        speaker: displayText(item.speaker || item.role, '藏鏡人'),
+        visual: displayText(item.visual || item.scene || item.shot, '可拍攝畫面'),
+        audio: displayText(item.audio || item.line || item.dialogue || item.content),
+      };
+    })
+    .filter((block) => block.audio);
+}
+
+function normalizeQualityCheck(value: unknown): QualityCheck | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const item = value as Record<string, unknown>;
+  return {
+    hook: displayText(item.hook || item.status || item.nextStep, '需補強'),
+    interaction: displayText(item.interaction || item.passed, '需補強'),
+    cta: displayText(item.cta || item.nextStep, '需補強'),
+    shootability: displayText(item.shootability || item.passed, '需補強'),
+    risk: displayText(item.risk || item.failed, '未檢出'),
+    humanSpeech: displayText(item.humanSpeech || item.humanNaturalness),
+  };
+}
+
+function normalizeStoryBeats(value: unknown): StoryBeats | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const item = value as Record<string, unknown>;
+  return {
+    hook: displayText(item.hook),
+    setup: displayText(item.setup),
+    conflict: displayText(item.conflict),
+    turningPoint: displayText(item.turningPoint || item.turning_point),
+    ending: displayText(item.ending),
+  };
+}
+
+function normalizeRehearsal(value: unknown): RehearsalLine[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .filter((line) => line && typeof line === 'object')
+    .map((line) => {
+      const item = line as Record<string, unknown>;
+      return {
+        speaker: displayText(item.speaker || item.role, '藏鏡人'),
+        line: displayText(item.line || item.audio || item.content),
+        innerOS: displayText(item.innerOS || item.inner_os),
+        purpose: displayText(item.purpose),
+      };
+    })
+    .filter((line) => line.line);
+}
+
+function normalizeVoiceDna(value: unknown): VoiceDna | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const item = value as Record<string, unknown>;
+  return {
+    brandVoice: displayText(item.brandVoice || item.brand_voice),
+    speakingRhythm: displayText(item.speakingRhythm || item.speaking_rhythm),
+    commonPhrases: asStringArray(item.commonPhrases || item.common_phrases),
+    forbiddenTone: asStringArray(item.forbiddenTone || item.forbidden_tone),
+    emotionalTexture: displayText(item.emotionalTexture || item.emotional_texture),
+    personaNotes: asStringArray(item.personaNotes || item.persona_notes),
+  };
+}
+
 function toScriptData(script: any, params?: ScriptParams): ScriptData {
   return {
     id: script?.id || crypto.randomUUID(),
@@ -283,22 +372,22 @@ function toScriptData(script: any, params?: ScriptParams): ScriptData {
     durationSeconds: script?.durationSeconds || params?.durationSeconds || 45,
     tones: script?.tones || params?.tones || currentPersona.tones,
     roles: script?.roles || params?.roles || ['品牌主', '藏鏡人'],
-    blocks: script?.blocks || [],
+    blocks: normalizeBlocks(script?.blocks),
     status: 'draft',
     createdAt: new Date().toISOString(),
-    hermesJudgement: script?.hermesJudgement,
-    usableMaterials: script?.usableMaterials,
-    missingInfo: script?.missingInfo,
-    safetyCheck: script?.safetyCheck,
-    citations: script?.citations || [],
-    qualityCheck: script?.qualityCheck,
-    rehearsalPreview: script?.rehearsalPreview,
-    realLines: script?.realLines,
-    storyBeats: script?.storyBeats,
+    hermesJudgement: displayText(script?.hermesJudgement),
+    usableMaterials: displayText(script?.usableMaterials),
+    missingInfo: displayText(script?.missingInfo),
+    safetyCheck: displayText(script?.safetyCheck),
+    citations: asStringArray(script?.citations),
+    qualityCheck: normalizeQualityCheck(script?.qualityCheck),
+    rehearsalPreview: normalizeRehearsal(script?.rehearsalPreview),
+    realLines: asStringArray(script?.realLines),
+    storyBeats: normalizeStoryBeats(script?.storyBeats),
     publicResearch: script?.publicResearch,
     publishPack: script?.publishPack,
     humanSpeechCheck: script?.humanSpeechCheck,
-    voiceDna: script?.voiceDna,
+    voiceDna: normalizeVoiceDna(script?.voiceDna),
   };
 }
 
