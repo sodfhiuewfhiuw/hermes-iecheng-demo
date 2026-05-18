@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Clock, MessageSquare, RefreshCw, Users, Wand2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, Clock, MessageSquare, RefreshCw, Users, Wand2 } from 'lucide-react';
 import { ScriptParams } from '../api';
 import { useAppContext } from '../store/AppContext';
 
@@ -12,22 +12,43 @@ function defaultRoles(style: string) {
   if (style === '三人討論') return ['主持人', '客戶', '藏鏡人'];
   if (style === '店員客人互動') return ['店員', '客人', '旁白'];
   if (style === '街訪問答') return ['訪問者', '路人', '旁白'];
-  if (style === '單人口播') return ['藏鏡人'];
+  if (style === '單人口播') return ['品牌主'];
   return ['品牌主', '藏鏡人'];
 }
 
+function formatQualityLabel(key: string) {
+  const labels: Record<string, string> = {
+    hook: '開場鉤子',
+    interaction: '角色互動',
+    cta: 'CTA 明確度',
+    shootability: '可拍攝性',
+    risk: '禁語與誇大風險',
+  };
+  return labels[key] || key;
+}
+
 export const ScriptWorkbenchView: React.FC = () => {
-  const { generateScript, rewriteScript, addMemory, scripts, persona, setActiveView } = useAppContext();
+  const { generateScript, rewriteScript, addMemory, scripts, persona } = useAppContext();
   const [params, setParams] = useState<ScriptParams>({
     platform: '多平台',
     purpose: '建立信任',
     scriptStyle: '雙人對話',
     durationSeconds: 45,
-    tones: persona?.tones?.length ? persona.tones : ['自然口語', '台灣在地感'],
+    tones: persona?.tones?.length ? persona.tones : ['自然口語', '專業可信', '台灣在地感'],
     roles: ['品牌主', '藏鏡人'],
   });
   const [busy, setBusy] = useState(false);
+  const [rewriteBusy, setRewriteBusy] = useState('');
+  const [error, setError] = useState('');
   const currentScript = scripts[0];
+
+  useEffect(() => {
+    if (!persona?.tones?.length) return;
+    setParams((prev) => ({
+      ...prev,
+      tones: Array.from(new Set([...persona.tones, ...prev.tones])),
+    }));
+  }, [persona?.tones]);
 
   const toggleTone = (tone: string) => {
     setParams((prev) => ({
@@ -42,10 +63,26 @@ export const ScriptWorkbenchView: React.FC = () => {
 
   const handleGenerate = async () => {
     setBusy(true);
+    setError('');
     try {
       await generateScript(params);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'API 錯誤，請聯繫官方');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleRewrite = async (instruction: string) => {
+    if (!currentScript) return;
+    setRewriteBusy(instruction);
+    setError('');
+    try {
+      await rewriteScript(currentScript.id, instruction);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'API 錯誤，請聯繫官方');
+    } finally {
+      setRewriteBusy('');
     }
   };
 
@@ -54,16 +91,22 @@ export const ScriptWorkbenchView: React.FC = () => {
       <header className="view-header flow-header">
         <div>
           <h1 className="view-title">腳本工作台</h1>
-          <p className="view-subtitle">保留表單式 fallback。正式小房間請使用「HERMES 小房間」入口，讓腳本讀取 room_state。</p>
+          <p className="view-subtitle">
+            表單式產生器會呼叫真實 HERMES LLM；API 失敗時會明確報錯，不會產生假草稿。
+          </p>
         </div>
-        <button className="btn btn-secondary" type="button" onClick={() => setActiveView('room')}>
-          <MessageSquare size={16} /> 前往小房間
-        </button>
       </header>
 
       <div className="view-content workbench-layout">
         <aside className="card workbench-controls">
           <h2 className="card-header">產出條件</h2>
+
+          {error && (
+            <div className="inline-alert error">
+              <AlertCircle size={15} />
+              <span>{error}</span>
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label">平台</label>
@@ -88,7 +131,15 @@ export const ScriptWorkbenchView: React.FC = () => {
 
           <div className="form-group">
             <label className="form-label">角色設定</label>
-            <input className="input-field" value={params.roles.join('、')} onChange={(event) => setParams({ ...params, roles: event.target.value.split(/[、,\n]/).map((item) => item.trim()).filter(Boolean) })} />
+            <input
+              className="input-field"
+              value={params.roles.join('、')}
+              onChange={(event) => setParams({
+                ...params,
+                roles: event.target.value.split(/[、,\n]/).map((item) => item.trim()).filter(Boolean),
+              })}
+              placeholder="例如：品牌主、藏鏡人、客戶"
+            />
           </div>
 
           <div className="form-group">
@@ -109,7 +160,7 @@ export const ScriptWorkbenchView: React.FC = () => {
 
           <button className="btn btn-primary full-width" type="button" onClick={handleGenerate} disabled={busy}>
             {busy ? <RefreshCw size={16} className="animate-spin" /> : <Wand2 size={16} />}
-            {busy ? 'HERMES 產出中...' : '產出 Demo 腳本'}
+            {busy ? 'HERMES 產生中...' : '產生腳本'}
           </button>
         </aside>
 
@@ -117,13 +168,13 @@ export const ScriptWorkbenchView: React.FC = () => {
           {!currentScript ? (
             <div className="card empty-state">
               <MessageSquare size={42} />
-              <p>尚未產出腳本。建議先到 HERMES 小房間貼素材，讓它先建立 voice_dna 與真人句。</p>
+              <p>還沒有腳本草稿。先設定人設、CTA 與角色形式，再產生一版可拍攝的互動腳本。</p>
             </div>
           ) : (
             <div className="script-output-stack">
               <div className="card">
-                <h2 className="card-header">{currentScript.scriptStyle} · {currentScript.purpose}</h2>
-                <p className="compact-text">{currentScript.hermesJudgement}</p>
+                <h2 className="card-header">{currentScript.scriptStyle} / {currentScript.purpose}</h2>
+                {currentScript.hermesJudgement && <p className="compact-text">{currentScript.hermesJudgement}</p>}
                 {(currentScript.blocks || []).map((block) => (
                   <div className="script-block" key={`${block.time}-${block.audio}`}>
                     <div className="script-time">{block.time}</div>
@@ -141,7 +192,7 @@ export const ScriptWorkbenchView: React.FC = () => {
                   <h2 className="card-header">品質檢查</h2>
                   {Object.entries(currentScript.qualityCheck).map(([key, value]) => (
                     <div className="metric-row" key={key}>
-                      <span>{key}</span>
+                      <span>{formatQualityLabel(key)}</span>
                       <strong>{String(value)}</strong>
                     </div>
                   ))}
@@ -149,9 +200,16 @@ export const ScriptWorkbenchView: React.FC = () => {
               )}
 
               <div className="button-row">
-                <button className="btn btn-secondary" type="button" onClick={() => rewriteScript(currentScript.id, '更口語')}>更口語</button>
-                <button className="btn btn-secondary" type="button" onClick={() => rewriteScript(currentScript.id, '加強角色衝突')}>加強角色衝突</button>
-                <button className="btn btn-secondary" type="button" onClick={() => addMemory('使用者偏好多人互動腳本，不要只有單人口播。')}>加入記憶</button>
+                <button className="btn btn-secondary" type="button" onClick={() => handleRewrite('請把台詞改得更像真人對話，減少公關稿和簡報感。')} disabled={Boolean(rewriteBusy)}>
+                  {rewriteBusy.includes('真人') ? <RefreshCw size={14} className="animate-spin" /> : null}
+                  更口語
+                </button>
+                <button className="btn btn-secondary" type="button" onClick={() => handleRewrite('請加強角色之間的衝突、追問、反應與轉折，但不要新增未提供的硬事實。')} disabled={Boolean(rewriteBusy)}>
+                  加強角色衝突
+                </button>
+                <button className="btn btn-secondary" type="button" onClick={() => addMemory('後續腳本優先保留角色互動、現場感、真人口語，不要寫成制式文案。')}>
+                  加入記憶
+                </button>
               </div>
             </div>
           )}

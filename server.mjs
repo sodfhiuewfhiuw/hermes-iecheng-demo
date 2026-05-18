@@ -76,6 +76,20 @@ function sendJson(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+function apiError(stage, detail, status = 502) {
+  const error = new Error('API 錯誤，請聯繫官方');
+  error.status = status;
+  error.payload = {
+    errorCode: 'AI_API_ERROR',
+    stage,
+    model: OPENAI_MODEL,
+    message: 'API 錯誤，請聯繫官方',
+    detail: detail instanceof Error ? detail.message : String(detail || ''),
+    fallbackUsed: false,
+  };
+  return error;
+}
+
 async function readJson(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
@@ -157,8 +171,23 @@ function wantsScript(content) {
   return /腳本|產出|生成|草稿|寫一版|短影音|拍一支|分鏡|口播|雙人|三人|劇情/.test(content);
 }
 
-async function askJson(messages, fallback, temperature = 0.7) {
-  if (!OPENAI_API_KEY) return fallback;
+function textList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (typeof item === 'string') return item;
+    if (item && typeof item === 'object') {
+      return item.text || item.suggestion || item.cta || item.content || item.value || item.title || '';
+    }
+    return String(item || '');
+  }).map((item) => String(item).trim()).filter(Boolean);
+}
+
+async function askJson(messages, fallback, temperature = 0.7, options = {}) {
+  const { allowFallback = false, stage = 'unknown' } = options;
+  if (!OPENAI_API_KEY) {
+    if (allowFallback) return { ...fallback, isFallback: true, fallbackReason: 'missing_openai_api_key' };
+    throw apiError(stage, 'missing_openai_api_key', 503);
+  }
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -177,7 +206,14 @@ async function askJson(messages, fallback, temperature = 0.7) {
     const data = await response.json();
     return JSON.parse(data?.choices?.[0]?.message?.content || '{}');
   } catch (error) {
-    return { ...fallback, _fallbackReason: error instanceof Error ? error.message : String(error) };
+    if (allowFallback) {
+      return {
+        ...fallback,
+        isFallback: true,
+        fallbackReason: error instanceof Error ? error.message : String(error),
+      };
+    }
+    throw apiError(stage, error);
   }
 }
 
@@ -391,7 +427,7 @@ function normalizeScriptOutput(raw, fallback) {
 
 function normalizeBrandName(brandName) {
   if (!brandName || typeof brandName !== 'string') return 'IE程';
-  if (/IE\?|IE蝔/.test(brandName)) return 'IE程';
+  if (/IE\?/.test(brandName)) return 'IE程';
   return brandName;
 }
 
@@ -401,8 +437,7 @@ function stabilizeBrandName(value, brandName) {
     return value
       .replace(/IE\s?程/g, safeBrandName)
       .replace(/IE\?/g, safeBrandName)
-      .replace(/IE蝔\?/g, safeBrandName)
-      .replace(/IE蝔/g, safeBrandName);
+      .replace(/IE\?/g, safeBrandName);
   }
   if (Array.isArray(value)) return value.map((item) => stabilizeBrandName(item, brandName));
   if (value && typeof value === 'object') {
@@ -448,7 +483,7 @@ async function generateScript(input) {
         input,
       }),
     },
-  ], fallback, 0.9);
+  ], fallback, 0.9, { allowFallback: false, stage: 'generate_script' });
   const brandName = input?.persona?.brandName;
   return sanitizeScriptCta(stabilizeBrandName(normalizeScriptOutput(raw, fallback), brandName), brandName);
 }
@@ -473,7 +508,7 @@ async function replyToMessage(context, content) {
   const result = await askJson([
     { role: 'system', content: `${HERMES_SYSTEM}\n你正在回覆 TG 小房間風格校準訊息。請判斷是否值得寫入 memory，並回傳 JSON：answer, openQuestions, memoryShouldSave, memory, voiceDnaPatch, stage。` },
     { role: 'user', content: JSON.stringify({ content, documents: context.documents, memories: context.memories, recentMessages: context.messages.slice(-8) }) },
-  ], fallback, 0.65);
+  ], fallback, 0.65, { allowFallback: true, stage: 'room_message' });
   return {
     intent: { intent: scriptIntent ? 'generate_script' : 'chat', shouldGenerateScript: scriptIntent, confidence: 0.85 },
     state: { ...context.state, currentStage: result.stage || fallback.stage, voiceDna: { ...context.state.voiceDna, ...(result.voiceDnaPatch || {}) }, openQuestions: result.openQuestions || fallback.openQuestions, updatedAt: new Date().toISOString() },
@@ -523,10 +558,10 @@ async function handleLearnText(req, roomId) {
   if (!text) throw new Error('Text is required');
   const chunks = chunkText(text);
   const summary = await askJson([
-    { role: 'system', content: '請把文字整理成 HERMES TG 腳本素材摘要，回傳 JSON：summary, highlights, tone, audience。' },
+    { role: 'system', content: `${HERMES_SYSTEM}\n請把使用者提供的文字整理成 IE程 可用的短影音腳本素材。你必須只根據文字內容建立事實邊界，不可補不存在的產品事實。回傳 JSON：summary, factBoundary, usableAngles, audienceSignals, voiceSignals, scriptMaterials, missingFacts, citations。` },
     { role: 'user', content: text.slice(0, 12000) },
-  ], { summary: text.slice(0, 180), highlights: [], tone: [], audience: [] }, 0.35);
-  const doc = { id: makeId('doc'), workspace_id: context.workspace.id, room_id: roomId, title: body.title || '文字匯入資料', source_type: 'manual_text', summary: summary.summary || text.slice(0, 180), source_text: text, chunks, deleted_at: null, created_at: new Date().toISOString() };
+  ], { summary: text.slice(0, 180), factBoundary: {}, usableAngles: [], audienceSignals: [], voiceSignals: [], scriptMaterials: [], missingFacts: [], citations: [] }, 0.35, { allowFallback: false, stage: 'room_learn_text' });
+  const doc = { id: makeId('doc'), workspace_id: context.workspace.id, room_id: roomId, title: body.title || '文字匯入資料', source_type: 'manual_text', summary: summary.summary || text.slice(0, 180), source_text: text, chunks, analysis: summary, deleted_at: null, created_at: new Date().toISOString() };
   store.documents.unshift(doc);
   store.messages.push({ id: makeId('msg'), workspace_id: context.workspace.id, room_id: roomId, role: 'assistant', output_type: 'chat', content: `已學習這份素材，後續生成會引用它。摘要：${doc.summary}`, metadata: { documentId: doc.id, summary }, created_at: new Date().toISOString() });
   addRun(context, 'learn_text', { documentId: doc.id, chunks: chunks.length }, summary);
@@ -553,14 +588,80 @@ async function handleGenerateScript(req, roomId) {
 
 async function handleSuggest(req, type) {
   const body = await readJson(req);
-  const brand = body.persona?.brandName || '你的品牌';
-  return { suggestions: type === 'cta' ? [`想把 ${brand} 的短影音方向整理清楚，先私訊「腳本」。`, `想先看這支可以怎麼拍，私訊「短影音腳本」，${brand} 先幫你抓一版方向。`] : ['不保證流量、成交或營收', '不使用恐嚇式行銷', '不把未提供的功能講成事實'] };
+  const persona = body.persona || {};
+  const fallback = { suggestions: [], reasoning: [], riskNotes: [], usedPersonaFields: [] };
+  const task = type === 'cta'
+    ? '請依 persona 產生 3 個低壓、自然、可放在短影音結尾的 CTA 建議。不可保證成效，不可出現小房間、丟素材給我、系統內部語。'
+    : '請依 persona 產生 3 到 5 條禁語與內容邊界建議，用來避免誇大承諾、硬事實捏造、醫療法律金融等高風險說法。';
+  const result = await askJson([
+    {
+      role: 'system',
+      content: `${HERMES_SYSTEM}\n你正在替 IE程 生成真正由 AI 判斷的人設輔助建議。只回 JSON：suggestions, reasoning, riskNotes, usedPersonaFields。`,
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        task,
+        persona: {
+          brandName: persona.brandName,
+          industry: persona.industry,
+          role: persona.role,
+          audience: persona.audience,
+          platforms: persona.platforms,
+          tones: persona.tones,
+          ctaGoal: persona.ctaGoal,
+          ctaKeyword: persona.ctaKeyword,
+          ctaStrength: persona.ctaStrength,
+          ctaNote: persona.ctaNote,
+        },
+      }),
+    },
+  ], fallback, 0.55, { allowFallback: false, stage: type === 'cta' ? 'suggest_cta' : 'suggest_boundaries' });
+  return {
+    suggestions: textList(result.suggestions),
+    reasoning: textList(result.reasoning),
+    riskNotes: textList(result.riskNotes),
+    usedPersonaFields: textList(result.usedPersonaFields),
+  };
 }
 
 async function handleLegacyLearn(req) {
   const body = await readJson(req);
   const text = String(body.input?.text || body.text || '').trim();
-  return { id: makeId('source'), background: '已將文字整理成 HERMES 可用素材。', highlights: '可用於人物定位、開場、CTA 與內容邊界。', audience: body.persona?.audience || '尚未明確', painPoints: `source_id=${Date.now()}; document_title=文字匯入資料; chunk_id=chunk_001; workspace_id=demo`, topics: '短影音素材 / 人設 / CTA', sellingPoints: '把原始文字整理成可拍攝腳本素材。', sourceText: text };
+  if (text.length < 8) {
+    const error = new Error('請提供至少 8 個字的文字資料。');
+    error.status = 400;
+    throw error;
+  }
+  const result = await askJson([
+    {
+      role: 'system',
+      content: `${HERMES_SYSTEM}\n請將文字資料整理成短影音腳本可用素材。只回 JSON：summary, factBoundary, usableAngles, audienceSignals, voiceSignals, scriptMaterials, missingFacts, citations。`,
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({ persona: body.persona || {}, text: text.slice(0, 12000) }),
+    },
+  ], { summary: '', factBoundary: {}, usableAngles: [], audienceSignals: [], voiceSignals: [], scriptMaterials: [], missingFacts: [], citations: [] }, 0.35, { allowFallback: false, stage: 'learn_text' });
+  const sourceId = makeId('source');
+  return {
+    id: sourceId,
+    background: result.summary || '已完成文字學習。',
+    highlights: Array.isArray(result.usableAngles) ? result.usableAngles.join('、') : '',
+    audience: Array.isArray(result.audienceSignals) ? result.audienceSignals.join('、') : body.persona?.audience || '尚未明確',
+    painPoints: Array.isArray(result.missingFacts) ? result.missingFacts.join('、') : '',
+    topics: Array.isArray(result.scriptMaterials) ? result.scriptMaterials.join('、') : '',
+    sellingPoints: Array.isArray(result.voiceSignals) ? result.voiceSignals.join('、') : '',
+    sourceText: text,
+    summary: result.summary,
+    factBoundary: result.factBoundary,
+    usableAngles: result.usableAngles,
+    audienceSignals: result.audienceSignals,
+    voiceSignals: result.voiceSignals,
+    scriptMaterials: result.scriptMaterials,
+    missingFacts: result.missingFacts,
+    citations: result.citations || [`source_id=${sourceId}; document_title=文字匯入資料; chunk_id=chunk_001; workspace_id=demo`],
+  };
 }
 
 function parseRoomPath(pathname) {
@@ -578,7 +679,7 @@ async function handleRequest(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const pathname = url.pathname;
     if (req.method === 'GET' && pathname === '/api/status') {
-      return sendJson(res, 200, { aiConnected: Boolean(OPENAI_API_KEY), model: OPENAI_MODEL, mode: 'hermes-tg-script-engine', promptIntegrity: 'ok', supabaseConfigured: false, localRoomPersistence: true, policy: 'TG script pipeline first' });
+      return sendJson(res, 200, { aiConnected: Boolean(OPENAI_API_KEY), model: OPENAI_MODEL, mode: 'hermes-tg-script-engine', promptIntegrity: 'ok', supabaseConfigured: false, localRoomPersistence: false, policy: 'real LLM or explicit error' });
     }
     if (req.method === 'POST' && pathname === '/api/rooms') return sendJson(res, 200, createRoom(await readJson(req), requireLocalUser(req)));
     const roomRoute = parseRoomPath(pathname);
@@ -596,7 +697,7 @@ async function handleRequest(req, res) {
     if (req.method === 'POST' && pathname === '/api/rewrite-script') return sendJson(res, 200, await generateScript(await readJson(req)));
     return sendJson(res, 404, { error: 'Not found' });
   } catch (error) {
-    return sendJson(res, error.status || 500, { error: error.message || 'Server error' });
+    return sendJson(res, error.status || 500, error.payload || { message: error.message || 'Server error', error: error.message || 'Server error' });
   }
 }
 

@@ -8,36 +8,31 @@ export const ContextPanel: React.FC = () => {
     learnedUrls,
     memories,
     scripts,
-    roomState,
-    roomDocuments,
-    roomDrafts,
     deleteMemory,
-    deleteRoomMemory,
   } = useAppContext();
 
   const handleDeleteMemory = async (id: string) => {
-    const ok = window.confirm('刪除後，這筆記憶不再參與後續生成。確定刪除？');
+    const ok = window.confirm('確定要刪除這筆記憶嗎？刪除後不會再參與後續生成。');
     if (!ok) return;
-    if (roomState) await deleteRoomMemory(id);
-    else await deleteMemory(id);
+    await deleteMemory(id);
   };
 
   return (
     <aside className="context-panel">
       <div className="context-header">
         <Activity size={18} color="var(--primary)" />
-        <span>小房間狀態</span>
+        <span>工作區狀態</span>
       </div>
 
       <div className="context-body">
         {persona && (
           <section className="context-card">
-            <div className="section-label"><Fingerprint size={14} /> 目前人設</div>
+            <div className="section-label"><Fingerprint size={14} /> 人設摘要</div>
             <div className="persona-summary">
               <strong>{persona.brandName}</strong>
               <span>{persona.role}</span>
               <div className="chip-row">
-                <span className="badge">{persona.industry}</span>
+                {persona.industry && <span className="badge">{persona.industry}</span>}
                 {persona.platforms.slice(0, 2).map((platform) => <span key={platform} className="badge">{platform}</span>)}
               </div>
             </div>
@@ -45,18 +40,18 @@ export const ContextPanel: React.FC = () => {
         )}
 
         <section className="context-card">
-          <div className="section-label"><Brain size={14} /> Runtime State</div>
+          <div className="section-label"><Brain size={14} /> HERMES 主流程</div>
           <div className="metric-row">
-            <span>目前階段</span>
-            <strong>{roomState?.currentStage || 'demo fallback'}</strong>
+            <span>AI 模式</span>
+            <strong>真 LLM</strong>
           </div>
           <div className="metric-row">
             <span>學習資料</span>
-            <strong>{roomDocuments.length || learnedUrls.length} 筆</strong>
+            <strong>{learnedUrls.length} 筆</strong>
           </div>
           <div className="metric-row">
             <span>腳本草稿</span>
-            <strong>{roomDrafts.length || scripts.length} 筆</strong>
+            <strong>{scripts.length} 筆</strong>
           </div>
           <div className="metric-row">
             <span>手動記憶</span>
@@ -64,32 +59,25 @@ export const ContextPanel: React.FC = () => {
           </div>
         </section>
 
-        {roomState?.voiceDna && Object.keys(roomState.voiceDna).length > 0 && (
+        {Boolean(persona?.tones?.length) && (
           <section className="context-card">
-            <div className="section-label">voice_dna</div>
-            <p className="compact-text">{roomState.voiceDna.brandVoice || '尚未明確'}</p>
-            <p className="compact-text">{roomState.voiceDna.speakingRhythm}</p>
+            <div className="section-label">語氣設定</div>
             <div className="chip-row">
-              {(roomState.voiceDna.commonPhrases || []).slice(0, 4).map((phrase) => <span className="badge" key={phrase}>{phrase}</span>)}
+              {(persona?.tones || []).slice(0, 6).map((tone) => <span className="badge" key={tone}>{tone}</span>)}
             </div>
           </section>
         )}
 
-        {roomState?.storyBeats && Object.keys(roomState.storyBeats).length > 0 && (
+        {persona?.ctaMethod && (
           <section className="context-card">
-            <div className="section-label">故事骨架</div>
-            {Object.entries(roomState.storyBeats).map(([key, value]) => (
-              <div className="small-kv" key={key}>
-                <span>{key}</span>
-                <strong>{String(value)}</strong>
-              </div>
-            ))}
+            <div className="section-label">CTA 設定</div>
+            <p className="compact-text">{persona.ctaMethod}</p>
           </section>
         )}
 
         {memories.length > 0 && (
           <section className="context-card">
-            <div className="section-label">最近記憶</div>
+            <div className="section-label">手動記憶</div>
             <div className="memory-list">
               {memories.slice(0, 5).map((memory) => (
                 <div className="memory-item" key={memory.id}>

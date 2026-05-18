@@ -1,6 +1,5 @@
 import React from 'react';
 import { useAppContext } from '../store/AppContext';
-import { HermesRoomView } from '../views/HermesRoomView';
 import { PersonaView } from '../views/PersonaView';
 import { ScriptLibraryView } from '../views/ScriptLibraryView';
 import { ScriptWorkbenchView } from '../views/ScriptWorkbenchView';
@@ -15,14 +14,12 @@ export const MainArea: React.FC = () => {
         return <PersonaView />;
       case 'learn-url':
         return <UrlLearningView />;
-      case 'room':
-        return <HermesRoomView />;
       case 'workbench':
         return <ScriptWorkbenchView />;
       case 'library':
         return <ScriptLibraryView />;
       default:
-        return <HermesRoomView />;
+        return <ScriptWorkbenchView />;
     }
   };
 

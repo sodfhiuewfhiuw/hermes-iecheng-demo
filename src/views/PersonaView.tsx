@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { useAppContext } from '../store/AppContext';
+import { ArrowRight, Lightbulb, Loader2, Save, Sparkles } from 'lucide-react';
 import { PersonaData } from '../api';
-import { ArrowRight, Lightbulb, Save, Sparkles } from 'lucide-react';
+import { useAppContext } from '../store/AppContext';
 
 const PLATFORM_OPTIONS = ['YouTube Shorts', 'TikTok/抖音', 'Instagram Reels', 'Facebook Reels', '多平台'];
-const TONE_OPTIONS = ['自然口語', '哥們專業', '台灣口語', '藏鏡人補刀', '心裡OS', '靠北現場', '溫柔專業', '犀利分析', '生活感', '更強CTA'];
+const TONE_OPTIONS = ['自然口語', '專業可信', '生活感', '幽默吐槽', '溫柔陪伴', '犀利分析', '台灣在地感'];
 const CTA_GOAL_OPTIONS = ['引導私訊', '索取資料', '預約諮詢', '留下表單', '加入 LINE', '導向連結', '索取腳本'];
 const CTA_STRENGTH_OPTIONS = ['自然提醒', '明確指令', '強 CTA', '保守收尾'];
 
@@ -29,6 +29,9 @@ export const PersonaView: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [ctaSuggestions, setCtaSuggestions] = useState<string[]>([]);
   const [boundarySuggestions, setBoundarySuggestions] = useState<string[]>([]);
+  const [ctaLoading, setCtaLoading] = useState(false);
+  const [boundaryLoading, setBoundaryLoading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (persona) setFormData({ ...emptyPersona, ...persona });
@@ -59,32 +62,61 @@ export const PersonaView: React.FC = () => {
       ctaGoal: '引導私訊',
       ctaKeyword: '短影音腳本',
       ctaStrength: '自然提醒',
-      ctaNote: '不要硬銷，像藏鏡人順手提醒。',
-      ctaMethod: '想先看你的短影音可以怎麼拍，私訊我「短影音腳本」，我先幫你抓一版方向。',
+      ctaNote: '不要硬銷，要像順手提醒下一步。',
+      ctaMethod: '想先看你的素材可以怎麼變成可拍的短影音腳本，私訊我「短影音腳本」，IE程先幫你抓一版方向。',
     });
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setIsSaving(true);
-    const payload = {
-      ...formData,
-      ctaMethod: formData.ctaMethod || buildCtaMethod(formData),
-    };
-    await updatePersona(payload);
-    setFormData(payload);
-    setIsSaving(false);
+    setError('');
+    try {
+      const payload = {
+        ...formData,
+        ctaMethod: formData.ctaMethod || buildCtaMethod(formData),
+      };
+      await updatePersona(payload);
+      setFormData(payload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '儲存失敗');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleSuggestCta = async () => setCtaSuggestions(await suggestCta({ ...formData, ctaMethod: buildCtaMethod(formData) }));
-  const handleSuggestBoundaries = async () => setBoundarySuggestions(await suggestBoundaries(formData));
+  const handleSuggestCta = async () => {
+    setCtaLoading(true);
+    setError('');
+    try {
+      setCtaSuggestions(await suggestCta({ ...formData, ctaMethod: buildCtaMethod(formData) }));
+    } catch (err) {
+      setCtaSuggestions([]);
+      setError(err instanceof Error ? err.message : 'API 錯誤，請聯繫官方');
+    } finally {
+      setCtaLoading(false);
+    }
+  };
+
+  const handleSuggestBoundaries = async () => {
+    setBoundaryLoading(true);
+    setError('');
+    try {
+      setBoundarySuggestions(await suggestBoundaries(formData));
+    } catch (err) {
+      setBoundarySuggestions([]);
+      setError(err instanceof Error ? err.message : 'API 錯誤，請聯繫官方');
+    } finally {
+      setBoundaryLoading(false);
+    }
+  };
 
   return (
     <div className="view-shell">
       <header className="view-header flow-header">
         <div>
           <h1 className="view-title">人設設定</h1>
-          <p className="view-subtitle">先把品牌、人設、受眾、語氣和 CTA 邊界設清楚，HERMES 才知道要用誰的嘴巴講話。</p>
+          <p className="view-subtitle">先把品牌、受眾、語氣、平台和 CTA 邊界設清楚，IE程 才能用對的角色與口吻寫腳本。</p>
         </div>
         <div className="flow-pills">
           <span className="active">1 人設</span>
@@ -95,17 +127,19 @@ export const PersonaView: React.FC = () => {
 
       <div className="view-content persona-layout">
         <div className="card ux-note">
-          <strong>人設不是填資料而已</strong>
-          <p>這裡會決定 HERMES 的 voice_dna：第一秒反應、心裡 OS、嘴巴實際回法、藏鏡人補刀方式。</p>
+          <strong>人設不是固定模板</strong>
+          <p>這裡會影響 HERMES 的 voice_dna、角色互動與 CTA 收尾。AI 建議會真的送到模型判斷，失敗時會直接顯示錯誤。</p>
           <button className="btn btn-secondary btn-sm" type="button" onClick={() => setActiveView('learn-url')}>
-            下一步：匯入學習資料 <ArrowRight size={14} />
+            前往文字資料學習 <ArrowRight size={14} />
           </button>
         </div>
 
         <form className="card persona-form" onSubmit={handleSubmit}>
+          {error && <div className="error-banner">{error}</div>}
+
           <div className="form-grid two">
             <div className="form-group">
-              <label className="form-label">品牌 / 人物名稱</label>
+              <label className="form-label">品牌 / 產品名稱</label>
               <input name="brandName" className="input-field" value={formData.brandName} onChange={handleTextChange} required />
             </div>
             <div className="form-group">
@@ -154,15 +188,16 @@ export const PersonaView: React.FC = () => {
           <div className="form-group suggestion-block">
             <div className="field-row">
               <label className="form-label">CTA 設定</label>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={handleSuggestCta}>
-                <Sparkles size={13} /> AI 建議
+              <button type="button" className="btn btn-secondary btn-sm" onClick={handleSuggestCta} disabled={ctaLoading}>
+                {ctaLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                AI 建議
               </button>
             </div>
 
             <div className="cta-guide">
               <div>
                 <strong>基礎 CTA</strong>
-                <p>先放一個保守可用版本，後續可以依品牌客製。這會真的傳進 HERMES 生成，不只是 UI 顯示。</p>
+                <p>先用自然提醒，不保證成效、不硬銷，讓使用者知道下一步可以私訊或索取腳本方向。</p>
               </div>
               <button className="btn btn-secondary btn-sm" type="button" onClick={applyBasicCta}>
                 套用基礎 CTA
@@ -187,7 +222,7 @@ export const PersonaView: React.FC = () => {
                 <input name="ctaKeyword" className="input-field" value={formData.ctaKeyword} onChange={handleTextChange} placeholder="例如：短影音腳本、品牌健檢" />
               </div>
               <div className="form-group">
-                <label className="form-label subtle-label">補充限制</label>
+                <label className="form-label subtle-label">語氣備註</label>
                 <input name="ctaNote" className="input-field" value={formData.ctaNote} onChange={handleTextChange} placeholder="例如：不要硬銷，要像順手提醒" />
               </div>
             </div>
@@ -209,8 +244,9 @@ export const PersonaView: React.FC = () => {
           <div className="form-group suggestion-block">
             <div className="field-row">
               <label className="form-label">不能講的話 / 內容邊界</label>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={handleSuggestBoundaries}>
-                <Lightbulb size={13} /> AI 建議
+              <button type="button" className="btn btn-secondary btn-sm" onClick={handleSuggestBoundaries} disabled={boundaryLoading}>
+                {boundaryLoading ? <Loader2 size={13} className="animate-spin" /> : <Lightbulb size={13} />}
+                AI 建議
               </button>
             </div>
             <textarea name="forbiddenWords" className="input-field" value={formData.forbiddenWords} onChange={handleTextChange} />
