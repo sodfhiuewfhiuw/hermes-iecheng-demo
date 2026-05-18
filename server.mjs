@@ -182,6 +182,70 @@ function textList(value) {
   }).map((item) => String(item).trim()).filter(Boolean);
 }
 
+async function buildIndustryInsight(input) {
+  const persona = input?.persona || {};
+  const params = input?.params || {};
+  const materials = collectMaterials(input).slice(0, 4).map((item) => ({
+    title: item.title,
+    text: item.text.slice(0, 600),
+  }));
+  const result = await askJson([
+    {
+      role: 'system',
+      content: `${HERMES_SYSTEM}\n你正在進行腳本生成前的行業洞察。這不是即時網路搜尋，不可假裝查過網站；但你可以使用安全的公開行業常識與使用者提供的產業、人設、平台、目的，推理受眾、痛點、信任障礙、常見情境、拍攝場景與角色關係。只回 JSON。`,
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        task: '建立 industryInsight，讓不同產業產生不同劇情骨架，不可共用固定模板。',
+        requiredShape: {
+          industry: 'string',
+          publicInfoBasis: ['用安全公開常識推理，不含即時查網或具體數字'],
+          audienceSegments: ['string'],
+          commonPainPoints: ['string'],
+          trustBarriers: ['string'],
+          purchaseTriggers: ['string'],
+          popularContentAngles: ['string'],
+          sceneSeeds: [
+            {
+              location: 'string',
+              firstAction: 'string',
+              prop: 'string',
+              conflict: 'string',
+              whyThisFitsIndustry: 'string',
+            },
+          ],
+          rolePatterns: [
+            {
+              roles: ['string'],
+              dynamic: 'string',
+            },
+          ],
+          realQuestions: ['觀眾或客戶會真的問出口的問題'],
+          tabooClaims: ['這個產業不能亂講的承諾'],
+        },
+        persona,
+        params,
+        materials,
+      }),
+    },
+  ], { industry: persona.industry || '', sceneSeeds: [], rolePatterns: [] }, 0.45, { allowFallback: false, stage: 'industry_research' });
+
+  return {
+    industry: String(result.industry || persona.industry || ''),
+    publicInfoBasis: textList(result.publicInfoBasis),
+    audienceSegments: textList(result.audienceSegments),
+    commonPainPoints: textList(result.commonPainPoints),
+    trustBarriers: textList(result.trustBarriers),
+    purchaseTriggers: textList(result.purchaseTriggers),
+    popularContentAngles: textList(result.popularContentAngles),
+    sceneSeeds: Array.isArray(result.sceneSeeds) ? result.sceneSeeds : [],
+    rolePatterns: Array.isArray(result.rolePatterns) ? result.rolePatterns : [],
+    realQuestions: textList(result.realQuestions),
+    tabooClaims: textList(result.tabooClaims),
+  };
+}
+
 async function askJson(messages, fallback, temperature = 0.7, options = {}) {
   const { allowFallback = false, stage = 'unknown' } = options;
   if (!OPENAI_API_KEY) {
@@ -248,6 +312,7 @@ function defaultRoles(params = {}) {
 function buildFallbackScript(input) {
   const params = input.params || {};
   const persona = input.persona || {};
+  const industryInsight = input.industryInsight || {};
   const materials = collectMaterials(input);
   const roles = defaultRoles(params);
   const source = materials[0]?.text || '目前素材不足，請先貼品牌介紹、客戶對話或 TG 腳本範例。';
@@ -261,10 +326,11 @@ function buildFallbackScript(input) {
       missingFacts: materials.length ? ['可再補真實客戶對話、案例、價格或服務限制'] : ['品牌服務內容', '目標受眾', '真實案例', 'CTA 去向'],
       doNotInvent: ['價格', '成效保證', '客戶案例', '服務過的人數', '得獎紀錄'],
     },
+    industryInsight,
     audiencePsychology: {
-      mainConcern: '觀眾怕這又是一支自我介紹或硬銷影片。',
-      watchReason: '看到品牌主也卡在「怎麼講才不像賣」時會有代入感。',
-      trustBarrier: '如果一開始只講賣點，觀眾會覺得跟自己無關。',
+      mainConcern: industryInsight.commonPainPoints?.[0] || '觀眾怕這又是一支自我介紹或硬銷影片。',
+      watchReason: industryInsight.popularContentAngles?.[0] || '看到品牌主也卡在「怎麼講才不像賣」時會有代入感。',
+      trustBarrier: industryInsight.trustBarriers?.[0] || '如果一開始只講賣點，觀眾會覺得跟自己無關。',
     },
     scriptCore: {
       type: '共鳴',
@@ -469,23 +535,26 @@ function sanitizeScriptCta(value, brandName) {
 }
 
 async function generateScript(input) {
-  const fallback = buildFallbackScript(input);
+  const industryInsight = await buildIndustryInsight(input);
+  const enrichedInput = { ...input, industryInsight };
+  const fallback = buildFallbackScript(enrichedInput);
   const raw = await askJson([
     {
       role: 'system',
-      content: `${HERMES_SYSTEM}\n\n${TG_SCRIPT_ENGINE}\n\n你必須回傳 JSON，不要 Markdown。audio 欄位必須是可直接拍攝或配音的台詞。不要把文字資料不足寫進台詞；文字資料只當事實邊界，不是劇作上限。`,
+      content: `${HERMES_SYSTEM}\n\n${TG_SCRIPT_ENGINE}\n\n你必須回傳 JSON，不要 Markdown。audio 欄位必須是可直接拍攝或配音的台詞。不要把文字資料不足寫進台詞；文字資料只當事實邊界，不是劇作上限。\n\n你已收到 industryInsight，必須使用它來改變故事場景、角色關係、觀眾痛點與道具。不可每個產業都寫同一套「品牌主不知道怎麼拍」模板。`,
     },
     {
       role: 'user',
       content: JSON.stringify({
-        task: '依照 TG 現場導演模式產出短影音腳本。先跑 factBoundary，再跑 audiencePsychology、scriptCore、roleRelationship、sceneLogic，最後才寫 blocks。即使資料少，也要用安全事實設計可拍場景、角色衝突、真人句、藏鏡人拆解；不可捏造產品事實。',
+        task: '依照 TG 現場導演模式產出短影音腳本。先讀 industryInsight，再跑 factBoundary、audiencePsychology、scriptCore、roleRelationship、sceneLogic，最後才寫 blocks。即使資料少，也要用行業常見痛點與安全事實設計可拍場景、角色衝突、真人句、藏鏡人拆解；不可捏造產品事實。',
         requiredKeys: Object.keys(fallback),
-        input,
+        input: enrichedInput,
       }),
     },
   ], fallback, 0.9, { allowFallback: false, stage: 'generate_script' });
   const brandName = input?.persona?.brandName;
-  return sanitizeScriptCta(stabilizeBrandName(normalizeScriptOutput(raw, fallback), brandName), brandName);
+  const normalized = normalizeScriptOutput({ ...raw, industryInsight: raw.industryInsight || industryInsight }, fallback);
+  return sanitizeScriptCta(stabilizeBrandName(normalized, brandName), brandName);
 }
 
 async function replyToMessage(context, content) {
