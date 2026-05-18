@@ -219,6 +219,35 @@ function buildFallbackScript(input) {
   const citations = materials.map((item, index) => `source_id=local_${index + 1}; document_title=${item.title}; chunk_id=chunk_${index + 1}; workspace_id=local-workspace-111`);
 
   return {
+    factBoundary: {
+      confirmedFacts: materials.length ? materials.map((item) => item.text.slice(0, 80)) : ['使用者正在建立短影音腳本'],
+      usableAngles: ['把素材翻成觀眾聽得懂的現場', '用角色互動降低廣告感'],
+      missingFacts: materials.length ? ['可再補真實客戶對話、案例、價格或服務限制'] : ['品牌服務內容', '目標受眾', '真實案例', 'CTA 去向'],
+      doNotInvent: ['價格', '成效保證', '客戶案例', '服務過的人數', '得獎紀錄'],
+    },
+    audiencePsychology: {
+      mainConcern: '觀眾怕這又是一支自我介紹或硬銷影片。',
+      watchReason: '看到品牌主也卡在「怎麼講才不像賣」時會有代入感。',
+      trustBarrier: '如果一開始只講賣點，觀眾會覺得跟自己無關。',
+    },
+    scriptCore: {
+      type: '共鳴',
+      reason: '先讓觀眾認出自己的卡點，再帶出 IE程 的腳本價值。',
+    },
+    roleRelationship: {
+      format: roles.length > 2 ? '多人互動' : '雙人對話',
+      roles,
+      dynamic: '品牌主拋出卡點，藏鏡人拆掉廣告語，觀眾在心裡點頭。',
+    },
+    sceneLogic: {
+      location: '拍攝現場或辦公桌前',
+      firstAction: '品牌主拿著素材卻不知道第一句怎麼開口',
+      interruption: '藏鏡人打斷品牌主想講賣點的衝動',
+      prop: '手機、空白腳本、白板或素材紙',
+      relationship: '品牌主想說清楚，藏鏡人負責把話拉回觀眾視角',
+      firstConflict: '品牌主怕一開口就像在賣東西',
+      firstHumanReaction: '我資料都有了，但寫出來怎麼還是像公司介紹？',
+    },
     hermesJudgement: `這支不能先寫賣點，要先抓觀眾心裡那句話。素材裡最能用的是：${source.slice(0, 90)}`,
     usableMaterials: materials.length ? materials.map((item) => item.title).join('、') : '素材不足，只能先做保守草稿',
     missingInfo: materials.length ? '還可以補更多真實客戶對話、TG 口頭禪、過去高成效腳本。' : '缺品牌素材、受眾、案例、口語範例。',
@@ -244,11 +273,14 @@ function buildFallbackScript(input) {
       '品牌想講的是賣點，觀眾想聽的是：這跟我有什麼關係？',
     ],
     storyBeats: {
-      hook: '短影音無效不是因為你不努力，而是腳本沒有現場感。',
-      setup: '品牌主拿著素材，卻寫不出能拍的內容。',
-      conflict: '藏鏡人指出問題在受眾心裡話、角色衝突與信任結構。',
-      turningPoint: '先模擬觀眾與品牌主的對話，再抽真人句。',
-      ending: cta,
+      firstAction: '品牌主拿著素材卡住，鏡頭停在空白腳本上。',
+      interruption: '藏鏡人問：你現在是想講產品，還是想讓人聽下去？',
+      firstReaction: '品牌主承認自己怕講得太像賣東西。',
+      context: '畫面帶到素材、手機和拍攝現場，建立短影音創作壓力。',
+      painReveal: '問題不是沒有資料，而是沒有觀眾願意聽的入口。',
+      humanExplanation: '藏鏡人把賣點翻成觀眾心裡 OS。',
+      twistOrPunch: '不是先拍片，是先把人話抓出來。',
+      softCta: cta,
     },
     publishPack: {
       title: '短影音不是先拍，是先操盤',
@@ -271,6 +303,15 @@ function buildFallbackScript(input) {
       shootability: '通過：每段都有畫面',
       risk: '通過：未誇大承諾',
       humanSpeech: '需補強：需要更多 TG 原生語料',
+    },
+    qualityScore: {
+      shootable: 8,
+      humanVoice: 7,
+      retention: 7,
+      interaction: roles.length > 1 ? 8 : 5,
+      singleCore: 8,
+      factSafe: 9,
+      suggestedFixes: ['補一個更具體的真實客戶反應', '補品牌服務細節後可提高客製化程度'],
     },
     blocks: [
       { time: '0-5 秒', speaker: roles[0], visual: '品牌主看著一疊素材和空白腳本，表情卡住。', audio: '我資料都有了，但寫出來怎麼還是像公司介紹？' },
@@ -339,6 +380,12 @@ function normalizeScriptOutput(raw, fallback) {
     humanSpeechCheck: result.humanSpeechCheck || fallback.humanSpeechCheck,
     voiceDna: result.voiceDna || fallback.voiceDna,
     citations: result.citations || fallback.citations,
+    factBoundary: result.factBoundary || fallback.factBoundary,
+    audiencePsychology: result.audiencePsychology || fallback.audiencePsychology,
+    scriptCore: result.scriptCore || fallback.scriptCore,
+    roleRelationship: result.roleRelationship || fallback.roleRelationship,
+    sceneLogic: result.sceneLogic || fallback.sceneLogic,
+    qualityScore: result.qualityScore || fallback.qualityScore,
   };
 }
 
@@ -396,7 +443,7 @@ async function generateScript(input) {
     {
       role: 'user',
       content: JSON.stringify({
-        task: '依照 TG 劇作家模式產出短影音腳本。即使資料少，也要用標準短影音情境、角色衝突、真人句、藏鏡人拆解產出可拍攝版本；不可捏造產品事實。',
+        task: '依照 TG 現場導演模式產出短影音腳本。先跑 factBoundary，再跑 audiencePsychology、scriptCore、roleRelationship、sceneLogic，最後才寫 blocks。即使資料少，也要用安全事實設計可拍場景、角色衝突、真人句、藏鏡人拆解；不可捏造產品事實。',
         requiredKeys: Object.keys(fallback),
         input,
       }),

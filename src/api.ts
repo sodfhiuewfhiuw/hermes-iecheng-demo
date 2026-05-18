@@ -113,6 +113,58 @@ export interface StoryBeats {
   conflict?: string;
   turningPoint?: string;
   ending?: string;
+  firstAction?: string;
+  interruption?: string;
+  firstReaction?: string;
+  context?: string;
+  painReveal?: string;
+  humanExplanation?: string;
+  twistOrPunch?: string;
+  softCta?: string;
+}
+
+export interface FactBoundary {
+  confirmedFacts?: string[];
+  usableAngles?: string[];
+  missingFacts?: string[];
+  doNotInvent?: string[];
+}
+
+export interface AudiencePsychology {
+  mainConcern?: string;
+  watchReason?: string;
+  trustBarrier?: string;
+}
+
+export interface ScriptCore {
+  type?: string;
+  reason?: string;
+}
+
+export interface RoleRelationship {
+  format?: string;
+  roles?: string[];
+  dynamic?: string;
+}
+
+export interface SceneLogic {
+  location?: string;
+  firstAction?: string;
+  interruption?: string;
+  prop?: string;
+  relationship?: string;
+  firstConflict?: string;
+  firstHumanReaction?: string;
+}
+
+export interface QualityScore {
+  shootable?: number;
+  humanVoice?: number;
+  retention?: number;
+  interaction?: number;
+  singleCore?: number;
+  factSafe?: number;
+  suggestedFixes?: string[];
 }
 
 export interface PublicResearch {
@@ -162,6 +214,12 @@ export interface ScriptData {
   publishPack?: PublishPack;
   humanSpeechCheck?: HumanSpeechCheck;
   voiceDna?: VoiceDna;
+  factBoundary?: FactBoundary;
+  audiencePsychology?: AudiencePsychology;
+  scriptCore?: ScriptCore;
+  roleRelationship?: RoleRelationship;
+  sceneLogic?: SceneLogic;
+  qualityScore?: QualityScore;
 }
 
 export interface MemoryData {
@@ -363,6 +421,80 @@ function normalizeVoiceDna(value: unknown): VoiceDna | undefined {
   };
 }
 
+function normalizeRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function normalizeFactBoundary(value: unknown): FactBoundary | undefined {
+  const item = normalizeRecord(value);
+  if (!item) return undefined;
+  return {
+    confirmedFacts: asStringArray(item.confirmedFacts || item.confirmed_facts),
+    usableAngles: asStringArray(item.usableAngles || item.usable_angles),
+    missingFacts: asStringArray(item.missingFacts || item.missing_facts),
+    doNotInvent: asStringArray(item.doNotInvent || item.do_not_invent),
+  };
+}
+
+function normalizeAudiencePsychology(value: unknown): AudiencePsychology | undefined {
+  const item = normalizeRecord(value);
+  if (!item) return undefined;
+  return {
+    mainConcern: displayText(item.mainConcern || item.main_concern),
+    watchReason: displayText(item.watchReason || item.watch_reason),
+    trustBarrier: displayText(item.trustBarrier || item.trust_barrier),
+  };
+}
+
+function normalizeScriptCore(value: unknown): ScriptCore | undefined {
+  const item = normalizeRecord(value);
+  if (!item) return undefined;
+  return {
+    type: displayText(item.type),
+    reason: displayText(item.reason),
+  };
+}
+
+function normalizeRoleRelationship(value: unknown): RoleRelationship | undefined {
+  const item = normalizeRecord(value);
+  if (!item) return undefined;
+  return {
+    format: displayText(item.format),
+    roles: asStringArray(item.roles),
+    dynamic: displayText(item.dynamic),
+  };
+}
+
+function normalizeSceneLogic(value: unknown): SceneLogic | undefined {
+  const item = normalizeRecord(value);
+  if (!item) return undefined;
+  return {
+    location: displayText(item.location),
+    firstAction: displayText(item.firstAction || item.first_action),
+    interruption: displayText(item.interruption),
+    prop: displayText(item.prop),
+    relationship: displayText(item.relationship),
+    firstConflict: displayText(item.firstConflict || item.first_conflict),
+    firstHumanReaction: displayText(item.firstHumanReaction || item.first_human_reaction),
+  };
+}
+
+function normalizeQualityScore(value: unknown): QualityScore | undefined {
+  const item = normalizeRecord(value);
+  if (!item) return undefined;
+  const toScore = (score: unknown) => Number.isFinite(Number(score)) ? Number(score) : undefined;
+  return {
+    shootable: toScore(item.shootable),
+    humanVoice: toScore(item.humanVoice || item.human_voice),
+    retention: toScore(item.retention),
+    interaction: toScore(item.interaction),
+    singleCore: toScore(item.singleCore || item.single_core),
+    factSafe: toScore(item.factSafe || item.fact_safe),
+    suggestedFixes: asStringArray(item.suggestedFixes || item.suggested_fixes),
+  };
+}
+
 function toScriptData(script: any, params?: ScriptParams): ScriptData {
   return {
     id: script?.id || crypto.randomUUID(),
@@ -388,6 +520,12 @@ function toScriptData(script: any, params?: ScriptParams): ScriptData {
     publishPack: script?.publishPack,
     humanSpeechCheck: script?.humanSpeechCheck,
     voiceDna: normalizeVoiceDna(script?.voiceDna),
+    factBoundary: normalizeFactBoundary(script?.factBoundary),
+    audiencePsychology: normalizeAudiencePsychology(script?.audiencePsychology),
+    scriptCore: normalizeScriptCore(script?.scriptCore),
+    roleRelationship: normalizeRoleRelationship(script?.roleRelationship),
+    sceneLogic: normalizeSceneLogic(script?.sceneLogic),
+    qualityScore: normalizeQualityScore(script?.qualityScore),
   };
 }
 
