@@ -96,29 +96,33 @@ interface HermesScriptResponse {
 }
 
 const defaultPersona: PersonaData = {
-  brandName: 'IE獅夢遊仙境',
-  industry: '短影音策略與腳本服務',
+  brandName: 'IE獅夢遊行銷',
+  industry: '短影音策略與內容操盤',
   role: '短影音藏鏡人',
   audience: '',
-  tones: ['自然口語', '專業可信'],
+  tones: ['自然口語', '專業可信', '台灣在地感'],
   platforms: ['Instagram Reels', 'YouTube Shorts'],
-  forbiddenWords: '不誇大保證成效\n不恐嚇式行銷\n不碰醫療、投資、保證收益類承諾',
-  ctaMethod: '想先知道你的短影音卡在哪裡，可以私訊「短影音健檢」拿初步方向。',
+  forbiddenWords: [
+    '不保證流量、成交或業績結果',
+    '不使用恐嚇式行銷',
+    '不編造案例、價格或成效數字',
+  ].join('\n'),
+  ctaMethod: '想知道你的短影音卡在哪裡，私訊「短影音健檢」，IE程先幫你抓出一個最該修的問題。',
   ctaGoal: '引導私訊',
   ctaKeyword: '短影音健檢',
-  ctaStrength: '自然提醒',
-  ctaNote: '不要太硬銷，讓對方覺得可以先詢問。',
+  ctaStrength: '自然但明確',
+  ctaNote: '不要過度銷售，要像藏鏡人在旁邊提醒對方下一步。',
 };
 
 let currentPersona: PersonaData = { ...defaultPersona };
 let learnedUrls: UrlLearningResult[] = [{
   id: 'demo_seed',
-  background: 'Demo 初始知識：IE程是文字學習與文稿產出助手，重點是吃進使用者提供的文字，整理成可用知識與文稿素材。',
-  highlights: '可用素材包含品牌介紹、服務說明、FAQ、銷售話術、社群貼文、EDM 與短影音腳本方向。',
-  audience: '目前語氣可依人設設定調整；若文本不足，IE程不會自行編造品牌語氣。',
+  background: 'Demo 初始知識：IE程是短影音腳本與文字學習工作區，會先讀使用者提供的資料，再整理成可拍、可改、可追溯的文稿素材。',
+  highlights: '可用素材包含品牌定位、服務說明、受眾痛點、常見誤解、CTA、FAQ、社群貼文與短影音腳本方向。',
+  audience: '目前語氣以自然口語、專業可信、台灣在地感為基礎；若文本不足，IE程不會自行編造完整品牌語氣。',
   painPoints: 'source_id=demo_seed; document_title=Demo 初始知識; chunk_id=chunk_001; workspace_id=demo-workspace-room',
-  topics: '品牌 / 服務 / 文稿素材 / 短影音',
-  sellingPoints: '可協助把已提供資料整理成社群貼文、EDM、短影音腳本、FAQ 與銷售話術；不主動查 URL。',
+  topics: '品牌 / 服務 / 話術 / 短影音腳本素材',
+  sellingPoints: '可協助把已提供的企業知識整理成腳本、社群貼文、FAQ、私訊引導與內容企劃；不主動爬 URL。',
   sourceText: 'Demo seed',
 }];
 let deletedLearningCitations = new Set<string>();
@@ -152,22 +156,22 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 
 function fallbackScriptError(reason: string): HermesScriptResponse {
   return {
-    hermesJudgement: 'IE程沒有成功完成本次產出。',
-    usableMaterials: '本次沒有產出可用素材，請確認 AI server、API key 或 server log。',
-    missingInfo: '缺少可用的模型回應。',
-    safetyCheck: '已阻止靜默 fallback，避免把無效內容當成正式輸出。',
+    hermesJudgement: 'IE程這次沒有成功拿到 AI 輸出，所以改用安全 fallback 呈現。',
+    usableMaterials: '請確認 AI server、API key 與 server log；目前沒有新增未提供的事實。',
+    missingInfo: '缺少穩定的 AI 回應，請稍後重試。',
+    safetyCheck: '已進入 fallback，沒有使用外部資料，也沒有寫入 core。',
     citations: [],
     qualityCheck: {
-      hook: '風險：未產出開場鉤子',
-      interaction: '風險：未產出角色互動',
-      cta: '風險：未產出 CTA',
-      shootability: '風險：未產出可拍攝腳本',
-      risk: '風險：AI 呼叫失敗',
+      hook: '風險：這是 fallback，不代表完整腳本品質。',
+      interaction: '風險：沒有取得 AI 角色互動判斷。',
+      cta: '風險：沒有取得 AI CTA 判斷。',
+      shootability: '風險：沒有取得 AI 拍攝檢查。',
+      risk: '風險：AI 呼叫失敗。',
     },
     blocks: [{
       time: 'AI 呼叫失敗',
       speaker: '系統',
-      visual: '請確認 AI server 是否啟動。',
+      visual: '請檢查 AI server 是否正常執行。',
       audio: reason,
     }],
   };
@@ -186,17 +190,38 @@ function markDeletedCitations(citations?: string[]) {
   ));
 }
 
+function localLearningFallback(input: { url?: string; text?: string }): UrlLearningResult {
+  const sourceId = `source_${Date.now()}`;
+  const text = input.text || input.url || '';
+  return {
+    id: sourceId,
+    background: text
+      ? '已把使用者提供的文字整理成 workspace 學習資料，可供後續腳本與文案使用。'
+      : '尚未提供可學習的文字內容。',
+    highlights: text
+      ? '可用素材包含品牌定位、服務說明、觀眾痛點、內容主題與 CTA 線索。'
+      : '目前沒有足夠資料可整理成素材。',
+    audience: currentPersona.tones.length
+      ? `目前語氣可依人設設定：${currentPersona.tones.join('、')}。`
+      : '目前文本不足以判斷完整品牌語氣。',
+    painPoints: `source_id=${sourceId}; document_title=文字匯入資料; chunk_id=chunk_001; workspace_id=demo-workspace-room`,
+    topics: '文字匯入 / 品牌資料 / 短影音素材',
+    sellingPoints: '可產出短影音腳本、社群貼文、FAQ、銷售話術與 CTA；若要更準，請補案例、價格、限制與常見問題。',
+    sourceText: text,
+  };
+}
+
 export const api = {
   getStatus: async (): Promise<StatusResponse> => {
     const aiStatus = await getServerStatus();
     return {
-      coreVersion: 'IE程 Text-Learning Core v0.1',
+      coreVersion: 'IE程 Demo Core v0.2',
       runtime: aiStatus?.aiConnected ? 'real AI via local server' : 'mock fallback',
       coreMutable: false,
       auth: aiStatus?.aiConnected ? 'local API key loaded server-side' : 'API key not loaded',
       workspaceId: 'demo-workspace-room',
-      isolationMode: 'text-only workspace learning',
-      sourceArtifact: 'text-learning agent, no URL fetch, original core untouched',
+      isolationMode: 'workspace text learning',
+      sourceArtifact: 'IE程 short-video script operator prompt',
       aiConnected: aiStatus?.aiConnected ?? false,
       aiModel: aiStatus?.model,
     };
@@ -216,18 +241,30 @@ export const api = {
   suggestCta: async (data: Partial<PersonaData>) => {
     try {
       const result = await postJson<{ suggestions: string[] }>('/api/suggest-cta', { persona: data });
-      return result?.suggestions?.length ? result.suggestions : ['私訊「短影音健檢」，取得一份適合你的內容方向'];
+      return result?.suggestions?.length ? result.suggestions : [
+        '想知道你的短影音卡在哪裡，私訊「短影音健檢」，IE程先幫你抓出一個最該修的問題。',
+      ];
     } catch {
-      return ['私訊「短影音健檢」，取得一份適合你的內容方向'];
+      return [
+        '想知道你的短影音卡在哪裡，私訊「短影音健檢」，IE程先幫你抓出一個最該修的問題。',
+        '如果你也不想再亂拍，先私訊「短影音健檢」，把人設和內容方向拆清楚。',
+      ];
     }
   },
 
   suggestBoundaries: async (data: Partial<PersonaData>) => {
     try {
       const result = await postJson<{ suggestions: string[] }>('/api/suggest-boundaries', { persona: data });
-      return result?.suggestions?.length ? result.suggestions : ['不誇大保證成效', '不使用恐嚇式行銷'];
+      return result?.suggestions?.length ? result.suggestions : [
+        '不保證流量、成交或業績結果。',
+        '不編造案例、價格或數據。',
+      ];
     } catch {
-      return ['不誇大保證成效', '不使用恐嚇式行銷'];
+      return [
+        '不保證流量、成交或業績結果。',
+        '不使用恐嚇式行銷或過度焦慮語氣。',
+        '沒有案例、數據或價格時，不自行編造。',
+      ];
     }
   },
 
@@ -237,17 +274,7 @@ export const api = {
     try {
       learned = await postJson<UrlLearningResult>('/api/learn-text', { persona: currentPersona, input: textInput, learnedTexts: learnedUrls });
     } catch {
-      const sourceId = `source_${Date.now()}`;
-      learned = {
-        id: sourceId,
-        background: '已收到使用者提供的文字資料，並整理為 workspace 知識。',
-        highlights: '可用於品牌介紹、服務說明、FAQ、銷售話術、社群貼文、EDM 與短影音腳本。',
-        audience: currentPersona.tones.length ? `目前語氣可依人設設定：${currentPersona.tones.join('、')}` : '目前文本不足以判斷完整品牌語氣。',
-        painPoints: `source_id=${sourceId}; document_title=文字匯入資料; chunk_id=chunk_001; workspace_id=demo-workspace-room`,
-        topics: '文字匯入 / 文稿素材 / 品牌知識',
-        sellingPoints: '可先產出保守版文稿；若需要更精準，請補充價格、活動日期、案例、限制與 CTA。',
-        sourceText: textInput.text,
-      };
+      learned = localLearningFallback(input);
     }
     const learnedWithId = withLearningId(learned);
     learnedUrls = [learnedWithId, ...learnedUrls];
@@ -297,7 +324,7 @@ export const api = {
       roles: params.roles,
       status: 'draft',
       createdAt: new Date().toISOString(),
-      blocks: result.blocks?.length ? result.blocks : fallbackScriptError('模型沒有回傳 blocks').blocks || [],
+      blocks: result.blocks?.length ? result.blocks : fallbackScriptError('AI 沒有回傳 blocks').blocks || [],
       hermesJudgement: result.hermesJudgement,
       usableMaterials: result.usableMaterials,
       missingInfo: result.missingInfo,
