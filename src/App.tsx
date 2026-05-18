@@ -8,11 +8,7 @@ const AppContent: React.FC = () => {
   const { isLoading } = useAppContext();
 
   if (isLoading) {
-    return (
-      <div className="loading-screen">
-        載入 IE程 Demo...
-      </div>
-    );
+    return <div className="loading-screen">載入 IE程 Demo...</div>;
   }
 
   return (

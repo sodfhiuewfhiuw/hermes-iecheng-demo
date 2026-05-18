@@ -5,26 +5,24 @@ import { BrainCircuit, CheckCircle2, Clock, FileText, Globe2, MessageSquare, Ref
 
 const PLATFORM_OPTIONS = ['Reels', 'TikTok/抖音', 'YouTube Shorts', 'Facebook Reels', '多平台'];
 const PURPOSE_OPTIONS = ['曝光', '建立信任', '教育教學', '破除誤解', '引導私訊', '成交轉換', '活動宣傳', '品牌記憶點'];
-const SCRIPT_STYLE_OPTIONS = ['單人口播', '雙人對話', '三人討論', '店員客人互動', '街訪問答', '情境短劇', '一人分飾兩角', '老闆藏鏡人拆解'];
-const TONE_OPTIONS = ['自然口語', '專業可信', '生活感', '幽默吐槽', '溫柔陪伴', '犀利分析', '台灣在地感', '更強 CTA'];
-const REWRITE_ACTIONS = ['重跑模擬現場', '增加互動衝突', '更口語一點', '更像短影音', '加強開場鉤子', '加強 CTA'];
+const SCRIPT_STYLE_OPTIONS = ['一人口播', '雙人對話', '三人討論', '店員客人互動', '街訪問答', '案例拆解', '藏鏡人操盤'];
+const TONE_OPTIONS = ['自然口語', '哥們專業', '台灣口語', '藏鏡人補刀', '心裡OS', '靠北現場', '溫柔專業', '犀利分析', '更有鉤子', '更強CTA'];
+const REWRITE_ACTIONS = ['更像真人', '加強心裡OS', '加強藏鏡人補刀', '加強衝突', '縮短句子', '加強CTA'];
 
 function defaultRolesForStyle(style: string) {
   switch (style) {
-    case '單人口播':
-      return ['旁白'];
+    case '一人口播':
+      return ['主角'];
     case '三人討論':
       return ['主持人', '客戶', '藏鏡人'];
     case '店員客人互動':
       return ['店員', '客人', '旁白'];
     case '街訪問答':
       return ['訪問者', '路人', '旁白'];
-    case '一人分飾兩角':
-      return ['理性版', '焦慮版'];
-    case '情境短劇':
-      return ['品牌主', '觀眾', '藏鏡人'];
-    case '老闆藏鏡人拆解':
-      return ['老闆', '藏鏡人', '旁白'];
+    case '案例拆解':
+      return ['品牌主', '客戶', '藏鏡人'];
+    case '藏鏡人操盤':
+      return ['IE程', '品牌主', '藏鏡人'];
     case '雙人對話':
     default:
       return ['品牌主', '藏鏡人'];
@@ -38,18 +36,19 @@ function qualityEntries(check?: any) {
     ['角色互動 / 衝突', check.interaction],
     ['CTA 是否明確', check.cta],
     ['是否可拍攝', check.shootability],
-    ['禁語與誇大風險', check.risk],
-  ];
+    ['禁語 / 誇大風險', check.risk],
+    ['人味口語檢查', check.humanSpeech],
+  ].filter(([, value]) => Boolean(value));
 }
 
 function beatEntries(beats?: StoryBeats) {
   if (!beats) return [];
   return [
     ['Hook', beats.hook],
-    ['推進', beats.setup],
-    ['衝突', beats.conflict],
-    ['轉折', beats.turningPoint],
-    ['收尾', beats.ending],
+    ['Setup', beats.setup],
+    ['Conflict', beats.conflict],
+    ['Turning Point', beats.turningPoint],
+    ['Ending', beats.ending],
   ].filter(([, value]) => Boolean(value));
 }
 
@@ -60,7 +59,7 @@ export const ScriptWorkbenchView: React.FC = () => {
     purpose: '建立信任',
     scriptStyle: '雙人對話',
     durationSeconds: 30,
-    tones: persona?.tones?.length ? persona.tones : ['自然口語'],
+    tones: persona?.tones?.length ? persona.tones : ['自然口語', '藏鏡人補刀'],
     roles: defaultRolesForStyle('雙人對話'),
     usePublicResearch: false,
   });
@@ -115,7 +114,7 @@ export const ScriptWorkbenchView: React.FC = () => {
 
   const handleAddMemory = async () => {
     if (!currentScript) return;
-    const memory = window.prompt('要把哪一段重點加入目前 workspace 記憶？');
+    const memory = window.prompt('加入一筆會影響後續腳本的 workspace 記憶：');
     if (memory) {
       await addMemory(memory);
       window.alert('已加入 workspace 記憶。');
@@ -126,13 +125,13 @@ export const ScriptWorkbenchView: React.FC = () => {
     <div className="view-shell">
       <header className="view-header flow-header">
         <div>
-          <h1 className="view-title">IE程 產出工作台</h1>
-          <p className="view-subtitle">已接入原始 HERMES「先模擬再成稿」流程：先逼真人句，再剪成故事骨架，最後才出拍攝腳本。</p>
+          <h1 className="view-title">腳本工作台</h1>
+          <p className="view-subtitle">HERMES 會先建立 voice_dna，再模擬現場，最後才產出完整拍攝版。這裡測的是 TG 小房間口語感。</p>
         </div>
         <div className="flow-pills">
           <span>1 人設</span>
           <span>2 學習</span>
-          <span className="active">3 模擬成稿</span>
+          <span className="active">3 腳本</span>
         </div>
       </header>
 
@@ -159,13 +158,13 @@ export const ScriptWorkbenchView: React.FC = () => {
             <select className="input-field" value={params.scriptStyle} onChange={(event) => updateScriptStyle(event.target.value)}>
               {SCRIPT_STYLE_OPTIONS.map((style) => <option key={style}>{style}</option>)}
             </select>
-            <p className="field-hint">多人腳本會先模擬現場，再剪對話，不會直接變成資訊口播。</p>
+            <p className="field-hint">多數短影音不是單人口播，建議先測雙人對話、三人討論或藏鏡人操盤。</p>
           </div>
 
           <div className="form-group">
             <label className="form-label"><Users size={14} /> 角色設定</label>
             <input className="input-field" value={roleText} onChange={(event) => updateRoles(event.target.value)} />
-            <p className="field-hint">可用頓號或逗號分隔，例如：品牌主、藏鏡人、客戶。</p>
+            <p className="field-hint">可手動改成：老闆、客人、藏鏡人。AI 會用這些角色名產出 speaker。</p>
           </div>
 
           <div className="form-group">
@@ -188,20 +187,16 @@ export const ScriptWorkbenchView: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label"><Globe2 size={14} /> 公開資訊輔助</label>
-            <button
-              className={`choice-chip ${params.usePublicResearch ? 'selected' : ''}`}
-              type="button"
-              onClick={() => setParams((prev) => ({ ...prev, usePublicResearch: !prev.usePublicResearch }))}
-            >
-              {params.usePublicResearch ? '已啟用公開產業查詢' : '不查公開資訊'}
+            <label className="form-label"><Globe2 size={14} /> 公開市場資訊</label>
+            <button className={`choice-chip ${params.usePublicResearch ? 'selected' : ''}`} type="button" onClick={() => setParams((prev) => ({ ...prev, usePublicResearch: !prev.usePublicResearch }))}>
+              {params.usePublicResearch ? '已啟用公開資訊查詢' : '不查公開資訊'}
             </button>
-            <p className="field-hint">開啟後只補市場現況、受眾訊號與熱門內容角度；品牌事實仍以 workspace 資料為主。</p>
+            <p className="field-hint">只查公開市場現況與受眾訊號，不把公開資訊寫成品牌承諾。</p>
           </div>
 
           <button className="btn btn-primary full-width" onClick={handleGenerate} disabled={isGenerating}>
             {isGenerating ? <RefreshCw size={16} className="animate-spin" /> : <Wand2 size={16} />}
-            {isGenerating ? 'IE程 模擬中...' : '讓 IE程 先模擬再成稿'}
+            {isGenerating ? 'HERMES 模擬中...' : '讓 HERMES 先模擬再成稿'}
           </button>
         </aside>
 
@@ -210,14 +205,14 @@ export const ScriptWorkbenchView: React.FC = () => {
             <div className="card empty-state">
               <div className="preflight-grid">
                 <div className="preflight-item complete">人設：{persona?.brandName}</div>
-                <div className={`preflight-item ${learnedUrls.length > 0 ? 'complete' : ''}`}>Workspace 學習：{learnedUrls.length} 份</div>
+                <div className={`preflight-item ${learnedUrls.length > 0 ? 'complete' : ''}`}>學習資料：{learnedUrls.length} 筆</div>
                 <div className="preflight-item complete">角色：{roleText}</div>
               </div>
               <MessageSquare size={40} />
-              <p>按下產出後，IE程 會先模擬現場對話，抓真人句，再剪成短影音腳本。</p>
+              <p>先選腳本形式與角色，HERMES 會先跑 voice_dna 與模擬現場，不會直接丟出空泛文案。</p>
               {learnedUrls.length <= 1 && (
                 <button className="btn btn-secondary btn-sm" type="button" onClick={() => setActiveView('learn-url')}>
-                  先去 IE程 學習室
+                  先匯入學習資料
                 </button>
               )}
             </div>
@@ -225,22 +220,35 @@ export const ScriptWorkbenchView: React.FC = () => {
             <div className="script-output-stack">
               <div className="hermes-brief-grid">
                 <div className="card hermes-brief-card primary">
-                  <div className="section-label"><BrainCircuit size={14} /> IE程 判斷</div>
-                  <p>{currentScript.hermesJudgement || 'IE程 已完成本次資料判斷。'}</p>
+                  <div className="section-label"><BrainCircuit size={14} /> HERMES 判斷</div>
+                  <p>{currentScript.hermesJudgement || 'HERMES 已完成初步判斷。'}</p>
                 </div>
                 <div className="card hermes-brief-card">
                   <div className="section-label">可用素材</div>
                   <p>{currentScript.usableMaterials || '已從 workspace 學習資料整理可用素材。'}</p>
                 </div>
                 <div className="card hermes-brief-card">
-                  <div className="section-label">缺少資料</div>
-                  <p>{currentScript.missingInfo || '目前沒有明顯缺口。'}</p>
+                  <div className="section-label">缺少資訊</div>
+                  <p>{currentScript.missingInfo || '目前沒有額外缺口。'}</p>
                 </div>
                 <div className="card hermes-brief-card">
                   <div className="section-label"><ShieldCheck size={14} /> 安全檢查</div>
-                  <p>{currentScript.safetyCheck || '未加入未提供的成效保證。'}</p>
+                  <p>{currentScript.safetyCheck || '已檢查禁語與內容邊界。'}</p>
                 </div>
               </div>
+
+              {currentScript.voiceDna && (
+                <div className="card quality-card">
+                  <div className="section-label">0 Voice DNA</div>
+                  <div className="quality-grid">
+                    <div className="quality-item"><strong>第一秒反應</strong><span>{currentScript.voiceDna.firstReactionPatterns?.join(' / ')}</span></div>
+                    <div className="quality-item"><strong>嘴巴實際回法</strong><span>{currentScript.voiceDna.mouthLines?.join(' / ')}</span></div>
+                    <div className="quality-item"><strong>心裡 OS</strong><span>{currentScript.voiceDna.innerOs?.join(' / ')}</span></div>
+                    <div className="quality-item"><strong>節奏</strong><span>{currentScript.voiceDna.rhythm}</span></div>
+                    <div className="quality-item"><strong>信心</strong><span>{currentScript.voiceDna.speechConfidence}</span></div>
+                  </div>
+                </div>
+              )}
 
               {currentScript.rehearsalPreview && currentScript.rehearsalPreview.length > 0 && (
                 <div className="card script-card">
@@ -248,7 +256,10 @@ export const ScriptWorkbenchView: React.FC = () => {
                   <div className="script-block-list">
                     {currentScript.rehearsalPreview.map((line, index) => (
                       <div className="script-block" key={`${line.speaker}-${index}`}>
-                        <div className="script-row"><strong>{line.speaker}</strong><span>{line.line}</span></div>
+                        <div className="script-row"><strong>角色</strong><span>{line.speaker}</span></div>
+                        <div className="script-row"><strong>現場</strong><span>{line.line}</span></div>
+                        {line.innerOs ? <div className="script-row"><strong>心裡</strong><span>{line.innerOs}</span></div> : null}
+                        {line.mouthLine ? <div className="script-row"><strong>嘴巴</strong><span>{line.mouthLine}</span></div> : null}
                         {line.purpose ? <div className="script-row"><strong>目的</strong><span>{line.purpose}</span></div> : null}
                       </div>
                     ))}
@@ -281,8 +292,8 @@ export const ScriptWorkbenchView: React.FC = () => {
 
               {currentScript.publicResearch && (
                 <div className="card quality-card">
-                  <div className="section-label"><Globe2 size={14} /> 公開資訊輔助</div>
-                  <p>{currentScript.publicResearch.industrySnapshot || '已查詢公開產業資訊。'}</p>
+                  <div className="section-label"><Globe2 size={14} /> 公開市場資訊</div>
+                  <p>{currentScript.publicResearch.industrySnapshot || '已查詢公開市場資訊。'}</p>
                   <div className="chip-row">
                     {(currentScript.publicResearch.audienceSignals || []).slice(0, 4).map((item) => <span className="badge" key={item}>{item}</span>)}
                     {(currentScript.publicResearch.popularAngles || []).slice(0, 4).map((item) => <span className="badge" key={item}>{item}</span>)}
@@ -349,7 +360,7 @@ export const ScriptWorkbenchView: React.FC = () => {
                 )}
 
                 <div className="rewrite-panel">
-                  <div className="section-label">改寫方向</div>
+                  <div className="section-label">改寫</div>
                   <div className="chip-row">
                     {REWRITE_ACTIONS.map((action) => (
                       <button key={action} className="btn btn-secondary btn-sm" onClick={() => handleRewrite(action)} disabled={!!rewritingId}>

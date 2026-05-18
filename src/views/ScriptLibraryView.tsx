@@ -20,14 +20,14 @@ export const ScriptLibraryView: React.FC = () => {
       <header className="view-header">
         <div>
           <h1 className="view-title">腳本庫</h1>
-          <p className="view-subtitle">保存產出的腳本草稿，並標記目前拍攝與發布狀態。</p>
+          <p className="view-subtitle">管理已產出的腳本草稿，標記拍攝與發布狀態。</p>
         </div>
       </header>
       <div className="view-content">
         {scripts.length === 0 ? (
           <div className="card empty-state">
             <FileText size={48} />
-            <p>目前還沒有腳本。請先到腳本工作台產生第一份草稿。</p>
+            <p>目前還沒有腳本。先到腳本工作台產出第一支。</p>
           </div>
         ) : (
           <div className="library-grid">
@@ -35,11 +35,7 @@ export const ScriptLibraryView: React.FC = () => {
               <div key={script.id} className="card library-card">
                 <div className="library-card-header">
                   {getStatusBadge(script.status)}
-                  <select
-                    className="input-field status-select"
-                    value={script.status}
-                    onChange={(event) => updateScriptStatus(script.id, event.target.value as any)}
-                  >
+                  <select className="input-field status-select" value={script.status} onChange={(event) => updateScriptStatus(script.id, event.target.value as any)}>
                     <option value="draft">草稿</option>
                     <option value="selected">已選用</option>
                     <option value="filmed">已拍攝</option>
@@ -53,13 +49,9 @@ export const ScriptLibraryView: React.FC = () => {
                   <span>{script.durationSeconds} 秒</span>
                 </div>
 
-                <div className="library-preview">
-                  {script.blocks[0]?.audio}
-                </div>
+                <div className="library-preview">{script.blocks[0]?.audio}</div>
 
-                <div className="library-date">
-                  {new Date(script.createdAt).toLocaleString('zh-TW')}
-                </div>
+                <div className="library-date">{new Date(script.createdAt).toLocaleString('zh-TW')}</div>
               </div>
             ))}
           </div>

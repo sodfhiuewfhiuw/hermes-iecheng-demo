@@ -6,11 +6,11 @@ export const ContextPanel: React.FC = () => {
   const { persona, learnedUrls, memories, scripts, deleteMemory } = useAppContext();
 
   if (!persona) {
-    return <aside className="context-panel context-loading">載入狀態...</aside>;
+    return <aside className="context-panel context-loading">載入中...</aside>;
   }
 
   const handleDeleteMemory = async (id: string) => {
-    const ok = window.confirm('確定要刪除這筆手動記憶？刪除後，後續腳本不會再帶入它。');
+    const ok = window.confirm('確定要刪除這筆記憶嗎？刪除後不再參與後續生成。');
     if (!ok) return;
     await deleteMemory(id);
   };
@@ -39,15 +39,15 @@ export const ContextPanel: React.FC = () => {
           <div className="section-label"><Brain size={14} /> Workspace 記憶</div>
           <div className="metric-row">
             <span>學習資料</span>
-            <strong>{learnedUrls.length} 份</strong>
+            <strong>{learnedUrls.length} 筆</strong>
           </div>
           <div className="metric-row">
             <span>腳本草稿</span>
-            <strong>{scripts.length} 份</strong>
+            <strong>{scripts.length} 筆</strong>
           </div>
           <div className="metric-row">
             <span>手動記憶</span>
-            <strong>{memories.length} 份</strong>
+            <strong>{memories.length} 筆</strong>
           </div>
 
           {memories.length > 0 && (
