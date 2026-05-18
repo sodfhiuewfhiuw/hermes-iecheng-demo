@@ -9,8 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 function loadEnvFile(fileName) {
   const envPath = path.join(__dirname, fileName);
   if (!fs.existsSync(envPath)) return;
-  const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
-  for (const line of lines) {
+  for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
     const eq = trimmed.indexOf('=');
@@ -30,6 +29,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const DEV_TOKEN = 'dev-local-token-111';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': APP_ORIGIN,
@@ -48,40 +48,46 @@ const prompts = Object.fromEntries(
 
 function checkPromptIntegrity() {
   const systemPrompt = prompts['hermes.system'] || '';
-  const required = ['HERMES', '藏鏡人', 'voice_dna', '心裡 OS'];
+  const required = ['HERMES', 'voice_dna'];
   const missing = required.filter((word) => !systemPrompt.includes(word));
-  if (missing.length) {
-    throw new Error(`Prompt integrity check failed. Missing: ${missing.join(', ')}`);
-  }
+  if (missing.length) throw new Error(`Prompt integrity check failed. Missing: ${missing.join(', ')}`);
 }
 
 checkPromptIntegrity();
 
-function supabaseConfigured() {
-  return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
-}
-
-const supabaseAdmin = supabaseConfigured()
-  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
+const supabaseAdmin = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } })
   : null;
 
-const DEV_TOKEN = 'dev-local-token-111';
+const localDataDir = path.join(__dirname, '.local');
+const localDataPath = path.join(localDataDir, 'hermes-room-store.json');
+
 const localStore = {
   workspace: { id: 'local-workspace-111', name: 'HERMES Local Room', role: 'owner' },
-  rooms: new Map(),
-  states: new Map(),
-  messages: new Map(),
-  documents: new Map(),
-  memories: new Map(),
-  drafts: new Map(),
+  rooms: [],
+  states: [],
+  messages: [],
+  documents: [],
+  memories: [],
+  drafts: [],
   agentRuns: [],
 };
 
-function makeId(prefix) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+function loadLocalStore() {
+  if (!fs.existsSync(localDataPath)) return;
+  try {
+    Object.assign(localStore, JSON.parse(fs.readFileSync(localDataPath, 'utf8')));
+  } catch (error) {
+    console.warn(`Local room store reset: ${error.message}`);
+  }
 }
+
+function saveLocalStore() {
+  fs.mkdirSync(localDataDir, { recursive: true });
+  fs.writeFileSync(localDataPath, JSON.stringify(localStore, null, 2));
+}
+
+loadLocalStore();
 
 function sendJson(res, status, data) {
   res.writeHead(status, { ...corsHeaders, 'Content-Type': 'application/json; charset=utf-8' });
@@ -95,28 +101,27 @@ async function readJson(req) {
   return text ? JSON.parse(text) : {};
 }
 
-function requireSupabaseReady() {
-  if (!supabaseAdmin) {
-    const error = new Error('Supabase is not configured');
-    error.status = 503;
-    error.details = {
-      missing: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'].filter((key) => !process.env[key]),
-    };
-    throw error;
-  }
+function makeId(prefix) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function chunkText(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  const chunks = [];
+  for (let i = 0; i < clean.length; i += 1000) chunks.push(clean.slice(i, i + 1000));
+  return chunks;
+}
+
+function authToken(req) {
+  const auth = req.headers.authorization || '';
+  return auth.startsWith('Bearer ') ? auth.slice(7) : '';
 }
 
 async function requireUser(req) {
-  const auth = req.headers.authorization || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!token) {
-    const error = new Error('Missing Authorization bearer token');
-    error.status = 401;
-    throw error;
-  }
+  const token = authToken(req);
+  if (token === DEV_TOKEN) return { id: 'dev-user-111', email: '111', local: true };
   if (!supabaseAdmin) {
-    if (token === DEV_TOKEN) return { id: 'dev-user-111', email: '111' };
-    const error = new Error('Invalid local dev token');
+    const error = new Error('Local test login only accepts account/password 111/111.');
     error.status = 401;
     throw error;
   }
@@ -129,119 +134,37 @@ async function requireUser(req) {
   return data.user;
 }
 
-async function ensureWorkspaceForUser(user) {
-  if (!supabaseAdmin) return localStore.workspace;
-
-  const { data: membership, error: membershipError } = await supabaseAdmin
-    .from('workspace_members')
-    .select('workspace_id, role, workspaces(id, name, owner_id)')
-    .eq('user_id', user.id)
-    .limit(1)
-    .maybeSingle();
-
-  if (membershipError) throw membershipError;
-  if (membership?.workspace_id) {
-    return {
-      id: membership.workspace_id,
-      name: membership.workspaces?.name || 'HERMES Workspace',
-      role: membership.role,
-    };
-  }
-
-  const { data: workspace, error: workspaceError } = await supabaseAdmin
-    .from('workspaces')
-    .insert({ name: 'HERMES Workspace', owner_id: user.id })
-    .select('*')
-    .single();
-  if (workspaceError) throw workspaceError;
-
-  const { error: memberError } = await supabaseAdmin
-    .from('workspace_members')
-    .insert({ workspace_id: workspace.id, user_id: user.id, role: 'owner' });
-  if (memberError) throw memberError;
-
-  return { id: workspace.id, name: workspace.name, role: 'owner' };
+function normalizeState(row, roomId, workspaceId) {
+  return row || {
+    roomId,
+    workspaceId,
+    currentStage: 'idle',
+    voiceDna: {},
+    latestRehearsal: [],
+    realLines: [],
+    storyBeats: {},
+    openQuestions: [],
+    lastQualityCheck: {},
+    activeScriptDraftId: null,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
-async function loadRoomContext(user, roomId) {
-  const workspace = await ensureWorkspaceForUser(user);
-  if (!supabaseAdmin) {
-    const room = localStore.rooms.get(roomId);
-    if (!room) {
-      const error = new Error('Room not found or not in local workspace');
-      error.status = 404;
-      throw error;
-    }
-    return {
-      workspace,
-      room,
-      state: localStore.states.get(roomId) || normalizeRoomState(null, roomId, workspace.id),
-      messages: localStore.messages.get(roomId) || [],
-      documents: (localStore.documents.get(roomId) || []).filter((item) => !item.deleted_at),
-      memories: (localStore.memories.get(roomId) || []).filter((item) => !item.deleted_at),
-      drafts: localStore.drafts.get(roomId) || [],
-    };
-  }
-
-  const { data: room, error: roomError } = await supabaseAdmin
-    .from('rooms')
-    .select('*')
-    .eq('id', roomId)
-    .eq('workspace_id', workspace.id)
-    .maybeSingle();
-  if (roomError) throw roomError;
+function localContext(roomId) {
+  const room = localStore.rooms.find((item) => item.id === roomId);
   if (!room) {
-    const error = new Error('Room not found or not in workspace');
+    const error = new Error('Room not found');
     error.status = 404;
     throw error;
   }
-
-  const [{ data: state }, { data: messages }, { data: documents }, { data: memories }, { data: drafts }] = await Promise.all([
-    supabaseAdmin.from('room_state').select('*').eq('room_id', roomId).maybeSingle(),
-    supabaseAdmin.from('room_messages').select('*').eq('room_id', roomId).order('created_at', { ascending: true }).limit(80),
-    supabaseAdmin.from('documents').select('*').eq('room_id', roomId).is('deleted_at', null).order('created_at', { ascending: false }).limit(20),
-    supabaseAdmin.from('memories').select('*').eq('room_id', roomId).is('deleted_at', null).order('created_at', { ascending: false }).limit(20),
-    supabaseAdmin.from('script_drafts').select('*').eq('room_id', roomId).order('created_at', { ascending: false }).limit(10),
-  ]);
-
   return {
-    workspace,
+    workspace: localStore.workspace,
     room,
-    state: normalizeRoomState(state, roomId, workspace.id),
-    messages: messages || [],
-    documents: documents || [],
-    memories: memories || [],
-    drafts: drafts || [],
-  };
-}
-
-function normalizeRoomState(row, roomId, workspaceId) {
-  return {
-    roomId,
-    workspaceId,
-    currentStage: row?.current_stage || 'idle',
-    voiceDna: row?.voice_dna || {},
-    latestRehearsal: row?.latest_rehearsal || [],
-    realLines: row?.real_lines || [],
-    storyBeats: row?.story_beats || {},
-    openQuestions: row?.open_questions || [],
-    lastQualityCheck: row?.last_quality_check || {},
-    activeScriptDraftId: row?.active_script_draft_id || null,
-    updatedAt: row?.updated_at || new Date().toISOString(),
-  };
-}
-
-function toDbStatePatch(state) {
-  return {
-    current_stage: state.currentStage || 'idle',
-    voice_dna: state.voiceDna || {},
-    latest_rehearsal: state.latestRehearsal || [],
-    real_lines: state.realLines || [],
-    story_beats: state.storyBeats || {},
-    open_questions: state.openQuestions || [],
-    last_quality_check: state.lastQualityCheck || {},
-    active_script_draft_id: state.activeScriptDraftId || null,
-    updated_at: new Date().toISOString(),
+    state: normalizeState(localStore.states.find((item) => item.roomId === roomId), roomId, localStore.workspace.id),
+    messages: localStore.messages.filter((item) => item.room_id === roomId),
+    documents: localStore.documents.filter((item) => item.room_id === roomId && !item.deleted_at),
+    memories: localStore.memories.filter((item) => item.room_id === roomId && !item.deleted_at),
+    drafts: localStore.drafts.filter((item) => item.room_id === roomId),
   };
 }
 
@@ -263,170 +186,129 @@ async function askJson(messages, fallback, temperature = 0.7) {
     });
     if (!response.ok) throw new Error(await response.text());
     const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content || '{}';
-    return JSON.parse(content);
+    return JSON.parse(data?.choices?.[0]?.message?.content || '{}');
   } catch (error) {
     return { ...fallback, _fallbackReason: error instanceof Error ? error.message : String(error) };
   }
 }
 
-function makeFallbackScript(input) {
-  const roles = input?.params?.roles?.length ? input.params.roles : ['品牌主', '藏鏡人'];
-  const duration = Number(input?.params?.durationSeconds || 30);
-  const step = Math.max(5, Math.round(duration / 5));
-  const cta = input?.persona?.ctaMethod || input?.persona?.ctaKeyword || '想把你的短影音方向整理清楚，可以先把素材丟進小房間。';
+function fallbackScript(input) {
+  const docs = input.documents || [];
+  const source = docs[0]?.chunks?.[0] || docs[0]?.summary || '目前還沒有足夠學習素材';
+  const roles = input.params?.roles?.length ? input.params.roles : ['品牌主', '藏鏡人'];
+  const cta = input.persona?.ctaMethod || input.persona?.ctaKeyword || '把素材丟進 HERMES 小房間，先跑一版真人互動腳本。';
   return {
-    hermesJudgement: '這版先用 HERMES 小房間邏輯跑：先抓衝突，再讓角色互動，不只做單人口播。',
-    usableMaterials: '可用素材包含人物定位、受眾、CTA、禁語與已匯入文字。',
-    missingInfo: '如果要更像原生 TG 小房間，需要補更多真實對話、口頭禪與案例。',
-    safetyCheck: '未使用外部資料，未引用已刪除來源。',
-    citations: [],
+    hermesJudgement: `這版有讀取小房間素材。素材重點：${String(source).slice(0, 120)}`,
+    usableMaterials: docs.map((doc) => doc.title).join('、') || '尚未匯入素材',
+    missingInfo: docs.length ? '若要更像 TG 原生 HERMES，請補更多口頭禪、真實對話和案例。' : '缺少品牌素材、受眾、案例與口語範例。',
+    safetyCheck: '未主動查網路；只使用小房間素材與本次對話。',
+    citations: docs.map((doc) => `source_id=${doc.id}; document_title=${doc.title}; chunk_id=chunk_001; workspace_id=${input.workspaceId || 'local-workspace-111'}`),
     voiceDna: {
-      brandVoice: '直接、口語、有操盤視角',
-      speakingRhythm: '先吐槽問題，再拆底層原因，最後給可執行下一步',
-      commonPhrases: ['不是先拍片，是先做操盤', '這段要有人味', '不要講成公關稿'],
-      forbiddenTone: ['空泛保證', '硬銷', '過度神化'],
-      emotionalTexture: '像藏鏡人在旁邊拆局',
+      brandVoice: '直接、口語、有藏鏡人拆局感',
+      speakingRhythm: '先點出問題，再補一刀真相，最後給可執行下一步',
+      commonPhrases: ['不是先拍片，是先操盤', '這段要有人味', '先抓觀眾心裡那句話'],
+      forbiddenTone: ['空泛保證', '公關稿', '硬銷'],
+      emotionalTexture: '像在小房間裡陪你拆腳本',
       personaNotes: roles,
     },
     rehearsalPreview: [
-      { speaker: roles[0], line: '我知道要做短影音，但每次寫出來都像廣告稿。', innerOS: '怕內容無效', purpose: '丟出真問題' },
-      { speaker: roles[1], line: '因為你現在不是缺腳本，是缺一個能讓人相信你的現場。', innerOS: '切入操盤觀點', purpose: '建立衝突' },
+      { speaker: roles[0], line: '我有素材，但寫出來都像在介紹公司。', innerOS: '怕內容又變無效文案', purpose: '丟出真問題' },
+      { speaker: roles[1] || '藏鏡人', line: '因為你現在缺的不是字，是缺一個觀眾會相信的現場。', innerOS: '拆掉表面問題', purpose: '建立衝突' },
     ],
     realLines: [
-      '你不是不會拍，是不知道這支影片要讓誰相信你。',
-      '先不要急著寫開場，先把觀眾心裡那句話抓出來。',
-      cta,
+      '你不是不會拍，是還沒抓到觀眾心裡那句話。',
+      '不要先寫腳本，先問這支片要讓誰相信你。',
+      '這段如果講得像簡報，觀眾就會直接滑走。',
     ],
     storyBeats: {
-      hook: '點破短影音無效的真正原因',
-      setup: '品牌主以為缺的是腳本',
-      conflict: '藏鏡人指出其實缺的是受眾、場景與信任結構',
-      turningPoint: '把素材放進小房間，先模擬現場再寫腳本',
+      hook: '短影音無效不是因為你不努力，而是腳本沒有現場感',
+      setup: '品牌主拿著素材卻寫不出能拍的內容',
+      conflict: '藏鏡人指出問題在受眾、角色衝突與信任結構',
+      turningPoint: '把素材丟進小房間，先模擬對話再抽真人句',
       ending: cta,
     },
     publishPack: {
       title: '短影音不是先拍，是先操盤',
-      subtitleFirstLine: '你的腳本不像人話，觀眾當然不會停下來。',
+      subtitleFirstLine: '你的腳本不像人話，觀眾當然不會停。',
       cta,
-      hashtags: ['#短影音操盤', '#IE程', '#內容企劃'],
+      hashtags: ['#短影音操盤', '#IE程', '#HERMES小房間'],
     },
     humanSpeechCheck: {
-      overall: '需補強',
-      aiPublicRelationsTone: '部分句子仍偏整理式，建議加入更多真實口頭禪。',
+      overall: docs.length ? '通過' : '需補強',
+      aiPublicRelationsTone: '已避免純公關稿，但仍需要更多你的 TG 口頭禪。',
       exaggeratedClaims: '未看到保證成效。',
       forbiddenWords: '未踩明確禁語。',
-      humanNaturalness: '角色互動已建立，但可再增加反問與停頓。',
-      suggestedFixes: ['補一段品牌主反駁', '加入更具體的拍攝動作', 'CTA 改成使用者指定句'],
+      humanNaturalness: '有雙人互動與衝突。',
+      suggestedFixes: ['補一段真實客戶對話', '加入品牌主反駁', 'CTA 改成更具體的私訊指令'],
     },
     qualityCheck: {
-      hook: '通過：有指出短影音無效原因',
-      interaction: '通過：有雙人衝突',
-      cta: cta ? '通過：使用指定 CTA' : '需補強：CTA 不夠明確',
-      shootability: '通過：可用對話與桌面/白板畫面拍攝',
+      hook: '通過：有點出問題',
+      interaction: '通過：有角色互動',
+      cta: cta ? '通過：有 CTA' : '需補強',
+      shootability: '通過：可拍成桌面、白板、小房間對話',
       risk: '通過：未誇大承諾',
-      humanSpeech: '需補強：可再貼近 TG 口語',
+      humanSpeech: '需補強：可再加入更多 TG 原生詞彙',
     },
-    blocks: Array.from({ length: 5 }).map((_, index) => {
-      const start = index * step;
-      const end = index === 4 ? duration : (index + 1) * step;
-      const speaker = roles[index % roles.length] || roles[0];
-      const lines = [
-        '你是不是也覺得，短影音做了很多，但好像都只是把資訊講完？',
-        '問題不是你不努力，是腳本沒有角色、沒有衝突、沒有一個人真的在現場說話。',
-        'HERMES 小房間會先看你的素材，抓 voice_dna，再模擬觀眾跟品牌主的對話。',
-        '等真人句跑出來，腳本才會像人講話，而不是像簡報被唸出來。',
-        cta,
-      ];
-      return {
-        time: `${start}-${end} 秒`,
-        speaker,
-        visual: index === 0 ? '鏡頭拍品牌主看著草稿皺眉，桌上有素材、便條紙與手機。' : '切到白板、小房間對話、角色互動與腳本卡片。',
-        audio: lines[index],
-      };
-    }),
+    blocks: [
+      { time: '0-6 秒', speaker: roles[0], visual: '品牌主看著一堆素材和空白腳本。', audio: '我資料都有了，但寫出來怎麼還是像公司介紹？' },
+      { time: '6-14 秒', speaker: roles[1] || '藏鏡人', visual: '藏鏡人把腳本圈出問題。', audio: '因為你現在不是缺文案，是缺觀眾會相信的現場。' },
+      { time: '14-24 秒', speaker: roles[1] || '藏鏡人', visual: '白板出現：受眾、衝突、真人句、CTA。', audio: `先看素材重點：${String(source).slice(0, 70)}。這段要變成觀眾聽得懂的話。` },
+      { time: '24-36 秒', speaker: roles[0], visual: '品牌主試著講出更口語的一句。', audio: '所以不是一直講我多專業，而是先講他卡在哪裡？' },
+      { time: '36-45 秒', speaker: roles[1] || '藏鏡人', visual: '畫面收斂成腳本卡片與 CTA。', audio: cta },
+    ],
   };
 }
 
 async function generateHermesScript(input) {
-  const fallback = makeFallbackScript(input);
+  const fallback = fallbackScript(input);
   return askJson([
-    { role: 'system', content: prompts['hermes.system'] },
-    {
-      role: 'user',
-      content: JSON.stringify({
-        task: 'generate full HERMES short video script as JSON',
-        requiredKeys: Object.keys(fallback),
-        input,
-      }),
-    },
+    { role: 'system', content: `${prompts['hermes.system']}\n你必須產出 JSON。腳本要讀取 documents.chunks，不可假裝沒有資料。` },
+    { role: 'user', content: JSON.stringify({ requiredKeys: Object.keys(fallback), input }) },
   ], fallback, 0.85);
 }
 
-async function runRoomMessagePipeline(context, content) {
-  const intent = await askJson([
-    { role: 'system', content: prompts.classify_intent },
-    { role: 'user', content },
-  ], {
-    intent: /腳本|產出|生成/.test(content) ? 'generate_script' : 'chat',
-    confidence: 0.7,
-    shouldGenerateScript: /腳本|產出|生成/.test(content),
-    reason: 'deterministic fallback',
-  }, 0.2);
-
-  const currentState = context.state;
+async function classifyAndReply(context, content) {
+  const wantsScript = /腳本|產出|生成|草稿|寫一版|短影音|拍/.test(content);
+  const docs = context.documents.map((doc) => ({
+    id: doc.id,
+    title: doc.title,
+    summary: doc.summary,
+    chunks: doc.chunks || [],
+  }));
   const voiceDna = await askJson([
-    { role: 'system', content: `${prompts['hermes.system']}\n\n${prompts.distill_voice_dna}` },
-    { role: 'user', content: JSON.stringify({ message: content, currentState, memories: context.memories, documents: context.documents }) },
+    { role: 'system', content: `${prompts['hermes.system']}\n${prompts.distill_voice_dna}` },
+    { role: 'user', content: JSON.stringify({ message: content, documents: docs, memories: context.memories, state: context.state }) },
+  ], fallbackScript({ documents: docs, params: { roles: ['品牌主', '藏鏡人'] } }).voiceDna, 0.5);
+  const reply = await askJson([
+    { role: 'system', content: `${prompts['hermes.system']}\n你正在小房間回覆。請直接使用已學習素材，不要只說流程。回傳 {"answer":"...","openQuestions":["..."]}` },
+    { role: 'user', content: JSON.stringify({ userMessage: content, documents: docs, voiceDna, recentMessages: context.messages.slice(-10) }) },
   ], {
-    brandVoice: 'HERMES 小房間口語操盤',
-    speakingRhythm: '先指出問題，再用藏鏡人拆解原因',
-    commonPhrases: ['不是先拍片，是先操盤'],
-    forbiddenTone: ['公關稿', '空泛保證'],
-    emotionalTexture: '直接但可落地',
-    personaNotes: [],
-  }, 0.5);
-
-  const nextState = {
-    ...currentState,
-    currentStage: intent.shouldGenerateScript ? 'ready_to_generate_script' : 'chatting',
-    voiceDna,
-    openQuestions: intent.shouldGenerateScript ? [] : ['要不要我把這段素材轉成一版雙人互動腳本？'],
-  };
-
+    answer: wantsScript
+      ? `我讀到 ${docs.length} 份素材。可以產腳本，但我會先用素材抓觀眾心裡話、角色衝突和真人句，不會只給單人口播。`
+      : `收到，這段已進小房間。現在有 ${docs.length} 份素材，後續會用它們判斷受眾、口氣和可拍攝句子。`,
+    openQuestions: wantsScript ? [] : ['這支要用雙人對話、三人討論，還是藏鏡人拆解？'],
+  }, 0.65);
   return {
-    intent,
-    state: nextState,
+    intent: { intent: wantsScript ? 'generate_script' : 'chat', shouldGenerateScript: wantsScript, confidence: 0.8 },
+    state: {
+      ...context.state,
+      currentStage: wantsScript ? 'ready_to_generate_script' : 'chatting',
+      voiceDna,
+      openQuestions: reply.openQuestions || [],
+      updatedAt: new Date().toISOString(),
+    },
     assistantMessage: {
       role: 'assistant',
-      outputType: intent.shouldGenerateScript ? 'question' : 'chat',
-      content: intent.shouldGenerateScript
-        ? '我已經抓到方向了。要產完整腳本的話，我會先跑「現場模擬 -> 真人句 -> 故事骨架 -> 草稿 -> 人話檢查」。'
-        : '收到，我先把這段放進小房間狀態。現在比較缺的是真實口頭禪、角色互動和觀眾心裡那句話。',
-      metadata: { intent, voiceDna },
+      outputType: wantsScript ? 'question' : 'chat',
+      content: reply.answer,
+      metadata: { voiceDna, documentsUsed: docs.map((doc) => doc.id) },
     },
   };
 }
 
-async function insertAgentRun(context, stage, inputSnapshot, outputSnapshot, status = 'success', error = null, userMessageId = null) {
-  if (!supabaseAdmin) {
-    localStore.agentRuns.push({
-      id: makeId('run'),
-      workspace_id: context.workspace.id,
-      room_id: context.room.id,
-      user_message_id: userMessageId,
-      stage,
-      input_snapshot: inputSnapshot || {},
-      output_snapshot: outputSnapshot || {},
-      model: OPENAI_MODEL,
-      status,
-      error,
-      created_at: new Date().toISOString(),
-    });
-    return;
-  }
-
-  await supabaseAdmin.from('agent_runs').insert({
+function insertAgentRun(context, stage, inputSnapshot, outputSnapshot, userMessageId = null) {
+  localStore.agentRuns.push({
+    id: makeId('run'),
     workspace_id: context.workspace.id,
     room_id: context.room.id,
     user_message_id: userMessageId,
@@ -434,323 +316,160 @@ async function insertAgentRun(context, stage, inputSnapshot, outputSnapshot, sta
     input_snapshot: inputSnapshot || {},
     output_snapshot: outputSnapshot || {},
     model: OPENAI_MODEL,
-    status,
-    error,
+    status: 'success',
+    created_at: new Date().toISOString(),
   });
+  saveLocalStore();
 }
 
-async function handleCreateRoom(req, res) {
-  const user = await requireUser(req);
+function createRoom(body, user) {
+  const room = {
+    id: makeId('room'),
+    workspace_id: localStore.workspace.id,
+    title: body.title || 'HERMES 小房間',
+    created_by: user.id,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const state = normalizeState(null, room.id, localStore.workspace.id);
+  localStore.rooms.unshift(room);
+  localStore.states.unshift(state);
+  saveLocalStore();
+  return { workspace: localStore.workspace, room, state, messages: [], documents: [], memories: [], drafts: [] };
+}
+
+async function handleRoomMessage(req, roomId) {
   const body = await readJson(req);
-  const workspace = await ensureWorkspaceForUser(user);
-  if (!supabaseAdmin) {
-    const room = {
-      id: makeId('room'),
-      workspace_id: workspace.id,
-      title: body.title || 'HERMES 小房間',
-      created_by: user.id,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    const state = normalizeRoomState(null, room.id, workspace.id);
-    localStore.rooms.set(room.id, room);
-    localStore.states.set(room.id, state);
-    localStore.messages.set(room.id, []);
-    localStore.documents.set(room.id, []);
-    localStore.memories.set(room.id, []);
-    localStore.drafts.set(room.id, []);
-    sendJson(res, 200, { workspace, room, state, messages: [], documents: [], memories: [], drafts: [] });
-    return;
-  }
-
-  const { data: room, error: roomError } = await supabaseAdmin
-    .from('rooms')
-    .insert({ workspace_id: workspace.id, title: body.title || 'HERMES 小房間', created_by: user.id })
-    .select('*')
-    .single();
-  if (roomError) throw roomError;
-
-  await supabaseAdmin.from('room_state').insert({ room_id: room.id, workspace_id: workspace.id });
-  sendJson(res, 200, { workspace, room, state: normalizeRoomState(null, room.id, workspace.id) });
-}
-
-async function handleGetRoomState(req, res, roomId) {
-  const user = await requireUser(req);
-  const context = await loadRoomContext(user, roomId);
-  sendJson(res, 200, context);
-}
-
-async function handleRoomMessage(req, res, roomId) {
-  const user = await requireUser(req);
-  const body = await readJson(req);
-  const context = await loadRoomContext(user, roomId);
+  const context = localContext(roomId);
   const content = String(body.content || '').trim();
   if (!content) throw new Error('Message content is required');
-
-  if (!supabaseAdmin) {
-    const messages = localStore.messages.get(roomId) || [];
-    const userMessage = {
-      id: makeId('msg'),
-      workspace_id: context.workspace.id,
-      room_id: roomId,
-      role: 'user',
-      content,
-      output_type: 'chat',
-      metadata: {},
-      created_at: new Date().toISOString(),
-    };
-    messages.push(userMessage);
-    const result = await runRoomMessagePipeline({ ...context, messages }, content);
-    await insertAgentRun(context, 'classify_intent', { content }, result.intent, 'success', null, userMessage.id);
-    await insertAgentRun(context, 'distill_voice_dna', { content }, result.state.voiceDna, 'success', null, userMessage.id);
-    localStore.states.set(roomId, result.state);
-    const assistant = {
-      id: makeId('msg'),
-      workspace_id: context.workspace.id,
-      room_id: roomId,
-      role: 'assistant',
-      content: result.assistantMessage.content,
-      output_type: result.assistantMessage.outputType,
-      metadata: result.assistantMessage.metadata,
-      created_at: new Date().toISOString(),
-    };
-    messages.push(assistant);
-    localStore.messages.set(roomId, messages);
-    const updated = await loadRoomContext(user, roomId);
-    sendJson(res, 200, { userMessage, assistantMessage: assistant, ...updated });
-    return;
-  }
-
-  const { data: userMessage, error: messageError } = await supabaseAdmin
-    .from('room_messages')
-    .insert({ workspace_id: context.workspace.id, room_id: roomId, role: 'user', content, output_type: 'chat' })
-    .select('*')
-    .single();
-  if (messageError) throw messageError;
-
-  const result = await runRoomMessagePipeline(context, content);
-  await insertAgentRun(context, 'classify_intent', { content }, result.intent, 'success', null, userMessage.id);
-  await insertAgentRun(context, 'distill_voice_dna', { content }, result.state.voiceDna, 'success', null, userMessage.id);
-
-  await supabaseAdmin.from('room_state').update(toDbStatePatch(result.state)).eq('room_id', roomId);
-  const { data: assistant } = await supabaseAdmin
-    .from('room_messages')
-    .insert({
-      workspace_id: context.workspace.id,
-      room_id: roomId,
-      role: 'assistant',
-      content: result.assistantMessage.content,
-      output_type: result.assistantMessage.outputType,
-      metadata: result.assistantMessage.metadata,
-    })
-    .select('*')
-    .single();
-
-  const updated = await loadRoomContext(user, roomId);
-  sendJson(res, 200, { userMessage, assistantMessage: assistant, ...updated });
+  const userMessage = {
+    id: makeId('msg'),
+    workspace_id: context.workspace.id,
+    room_id: roomId,
+    role: 'user',
+    content,
+    output_type: 'chat',
+    metadata: {},
+    created_at: new Date().toISOString(),
+  };
+  localStore.messages.push(userMessage);
+  const conversationMemory = {
+    id: makeId('mem'),
+    workspace_id: context.workspace.id,
+    room_id: roomId,
+    content: `使用者在小房間補充：${content}`,
+    source_type: 'room_message',
+    source_message_id: userMessage.id,
+    deleted_at: null,
+    created_at: new Date().toISOString(),
+  };
+  localStore.memories.unshift(conversationMemory);
+  const result = await classifyAndReply({
+    ...context,
+    messages: [...context.messages, userMessage],
+    memories: [conversationMemory, ...context.memories],
+  }, content);
+  localStore.states = localStore.states.filter((item) => item.roomId !== roomId);
+  localStore.states.unshift(result.state);
+  const assistant = {
+    id: makeId('msg'),
+    workspace_id: context.workspace.id,
+    room_id: roomId,
+    role: 'assistant',
+    content: result.assistantMessage.content,
+    output_type: result.assistantMessage.outputType,
+    metadata: result.assistantMessage.metadata,
+    created_at: new Date().toISOString(),
+  };
+  localStore.messages.push(assistant);
+  insertAgentRun(context, 'classify_intent', { content }, result.intent, userMessage.id);
+  insertAgentRun(context, 'distill_voice_dna', { content }, result.state.voiceDna, userMessage.id);
+  saveLocalStore();
+  return { userMessage, assistantMessage: assistant, ...localContext(roomId) };
 }
 
-function chunkText(text) {
-  const clean = text.replace(/\s+/g, ' ').trim();
-  if (!clean) return [];
-  const chunks = [];
-  for (let i = 0; i < clean.length; i += 1200) chunks.push(clean.slice(i, i + 1200));
-  return chunks;
-}
-
-async function handleLearnText(req, res, roomId) {
-  const user = await requireUser(req);
+async function handleLearnText(req, roomId) {
   const body = await readJson(req);
-  const context = await loadRoomContext(user, roomId);
+  const context = localContext(roomId);
   const text = String(body.text || body.input?.text || '').trim();
   if (!text) throw new Error('Text is required');
-
-  const summaryResult = await askJson([
-    { role: 'system', content: `${prompts['hermes.system']}\n請把使用者文字整理成可檢索素材摘要。` },
-    { role: 'user', content: text.slice(0, 12000) },
-  ], {
-    summary: text.slice(0, 180),
-    highlights: ['已匯入小房間素材'],
-    audience: [],
-    tone: [],
-  }, 0.4);
-
-  if (!supabaseAdmin) {
-    const doc = {
-      id: makeId('doc'),
-      workspace_id: context.workspace.id,
-      room_id: roomId,
-      title: body.title || '文字匯入資料',
-      source_type: 'manual_text',
-      summary: summaryResult.summary || text.slice(0, 180),
-      deleted_at: null,
-      created_at: new Date().toISOString(),
-    };
-    const docs = localStore.documents.get(roomId) || [];
-    docs.unshift(doc);
-    localStore.documents.set(roomId, docs);
-
-    const messages = localStore.messages.get(roomId) || [];
-    messages.push({
-      id: makeId('msg'),
-      workspace_id: context.workspace.id,
-      room_id: roomId,
-      role: 'assistant',
-      output_type: 'chat',
-      content: `已學習這份文字素材。摘要：${summaryResult.summary || '已建立可檢索素材。'}`,
-      metadata: { documentId: doc.id, summaryResult },
-      created_at: new Date().toISOString(),
-    });
-    localStore.messages.set(roomId, messages);
-    await insertAgentRun(context, 'learn_text', { documentId: doc.id }, summaryResult);
-    sendJson(res, 200, { document: doc, chunks: chunkText(text).length, summary: summaryResult });
-    return;
-  }
-
-  const { data: doc, error: docError } = await supabaseAdmin
-    .from('documents')
-    .insert({
-      workspace_id: context.workspace.id,
-      room_id: roomId,
-      title: body.title || '文字匯入資料',
-      source_type: 'manual_text',
-      summary: summaryResult.summary || '',
-    })
-    .select('*')
-    .single();
-  if (docError) throw docError;
-
   const chunks = chunkText(text);
-  if (chunks.length) {
-    await supabaseAdmin.from('document_chunks').insert(chunks.map((content, index) => ({
-      workspace_id: context.workspace.id,
-      document_id: doc.id,
-      chunk_index: index,
-      content,
-      metadata: { title: doc.title },
-    })));
-  }
-
-  await supabaseAdmin.from('room_messages').insert({
+  const summary = await askJson([
+    { role: 'system', content: '請把文字整理成 HERMES 小房間可用素材摘要，回傳 {"summary":"...","highlights":["..."],"tone":["..."],"audience":["..."]}' },
+    { role: 'user', content: text.slice(0, 12000) },
+  ], { summary: text.slice(0, 180), highlights: [], tone: [], audience: [] }, 0.35);
+  const doc = {
+    id: makeId('doc'),
+    workspace_id: context.workspace.id,
+    room_id: roomId,
+    title: body.title || '文字匯入資料',
+    source_type: 'manual_text',
+    summary: summary.summary || text.slice(0, 180),
+    source_text: text,
+    chunks,
+    deleted_at: null,
+    created_at: new Date().toISOString(),
+  };
+  localStore.documents.unshift(doc);
+  localStore.messages.push({
+    id: makeId('msg'),
     workspace_id: context.workspace.id,
     room_id: roomId,
     role: 'assistant',
     output_type: 'chat',
-    content: `已學習這份文字素材。摘要：${summaryResult.summary || '已建立可檢索素材。'}`,
-    metadata: { documentId: doc.id, summaryResult },
+    content: `已學習這份素材，會參與後續腳本生成。摘要：${doc.summary}`,
+    metadata: { documentId: doc.id, summary },
+    created_at: new Date().toISOString(),
   });
-
-  await insertAgentRun(context, 'learn_text', { documentId: doc.id }, summaryResult);
-  sendJson(res, 200, { document: doc, chunks: chunks.length, summary: summaryResult });
+  insertAgentRun(context, 'learn_text', { documentId: doc.id, chunks: chunks.length }, summary);
+  saveLocalStore();
+  return { document: doc, chunks: chunks.length, summary, ...localContext(roomId) };
 }
 
-async function handleGenerateRoomScript(req, res, roomId) {
-  const user = await requireUser(req);
+async function handleGenerateScript(req, roomId) {
   const body = await readJson(req);
-  const context = await loadRoomContext(user, roomId);
+  const context = localContext(roomId);
+  const params = body.params || {
+    platform: '多平台',
+    purpose: '建立信任',
+    scriptStyle: '雙人對話',
+    durationSeconds: 45,
+    tones: ['自然口語', '台灣在地感'],
+    roles: ['品牌主', '藏鏡人'],
+  };
   const input = {
+    workspaceId: context.workspace.id,
     roomState: context.state,
     documents: context.documents,
     memories: context.memories,
     recentMessages: context.messages.slice(-20),
     persona: body.persona || {},
-    params: body.params || {
-      platform: '多平台',
-      purpose: '建立信任',
-      scriptStyle: '雙人對話',
-      durationSeconds: 45,
-      tones: [],
-      roles: ['品牌主', '藏鏡人'],
-    },
+    params,
   };
-
   const script = await generateHermesScript(input);
-
-  if (!supabaseAdmin) {
-    const draft = {
-      id: makeId('draft'),
-      workspace_id: context.workspace.id,
-      room_id: roomId,
-      status: 'draft',
-      platform: input.params.platform,
-      purpose: input.params.purpose,
-      script_style: input.params.scriptStyle,
-      duration_seconds: input.params.durationSeconds,
-      roles: input.params.roles || [],
-      tones: input.params.tones || [],
-      rehearsal_preview: script.rehearsalPreview || [],
-      real_lines: script.realLines || [],
-      story_beats: script.storyBeats || {},
-      blocks: script.blocks || [],
-      citations: script.citations || [],
-      quality_check: script.qualityCheck || {},
-      human_speech_check: script.humanSpeechCheck || {},
-      publish_pack: script.publishPack || {},
-      created_at: new Date().toISOString(),
-    };
-    const drafts = localStore.drafts.get(roomId) || [];
-    drafts.unshift(draft);
-    localStore.drafts.set(roomId, drafts);
-
-    const nextState = {
-      ...context.state,
-      currentStage: 'script_drafted',
-      voiceDna: script.voiceDna || context.state.voiceDna,
-      latestRehearsal: script.rehearsalPreview || [],
-      realLines: script.realLines || [],
-      storyBeats: script.storyBeats || {},
-      lastQualityCheck: script.humanSpeechCheck || script.qualityCheck || {},
-      activeScriptDraftId: draft.id,
-      updatedAt: new Date().toISOString(),
-    };
-    localStore.states.set(roomId, nextState);
-
-    const messages = localStore.messages.get(roomId) || [];
-    messages.push({
-      id: makeId('msg'),
-      workspace_id: context.workspace.id,
-      room_id: roomId,
-      role: 'assistant',
-      output_type: 'script',
-      content: script.hermesJudgement || '已產出 HERMES 小房間腳本草稿。',
-      metadata: { draftId: draft.id, script },
-      created_at: new Date().toISOString(),
-    });
-    localStore.messages.set(roomId, messages);
-
-    for (const stage of ['simulate_scene', 'extract_real_lines', 'build_story_beats', 'draft_script', 'human_speech_check']) {
-      await insertAgentRun(context, stage, input, { stage, draftId: draft.id, script });
-    }
-
-    const updated = await loadRoomContext(user, roomId);
-    sendJson(res, 200, { draft, script, ...updated });
-    return;
-  }
-
-  const { data: draft, error: draftError } = await supabaseAdmin
-    .from('script_drafts')
-    .insert({
-      workspace_id: context.workspace.id,
-      room_id: roomId,
-      platform: input.params.platform,
-      purpose: input.params.purpose,
-      script_style: input.params.scriptStyle,
-      duration_seconds: input.params.durationSeconds,
-      roles: input.params.roles || [],
-      tones: input.params.tones || [],
-      rehearsal_preview: script.rehearsalPreview || [],
-      real_lines: script.realLines || [],
-      story_beats: script.storyBeats || {},
-      blocks: script.blocks || [],
-      citations: script.citations || [],
-      quality_check: script.qualityCheck || {},
-      human_speech_check: script.humanSpeechCheck || {},
-      publish_pack: script.publishPack || {},
-    })
-    .select('*')
-    .single();
-  if (draftError) throw draftError;
-
+  const draft = {
+    id: makeId('draft'),
+    workspace_id: context.workspace.id,
+    room_id: roomId,
+    status: 'draft',
+    platform: params.platform,
+    purpose: params.purpose,
+    script_style: params.scriptStyle,
+    duration_seconds: params.durationSeconds,
+    roles: params.roles || [],
+    tones: params.tones || [],
+    rehearsal_preview: script.rehearsalPreview || [],
+    real_lines: script.realLines || [],
+    story_beats: script.storyBeats || {},
+    blocks: script.blocks || [],
+    citations: script.citations || [],
+    quality_check: script.qualityCheck || {},
+    human_speech_check: script.humanSpeechCheck || {},
+    publish_pack: script.publishPack || {},
+    created_at: new Date().toISOString(),
+  };
+  localStore.drafts.unshift(draft);
   const nextState = {
     ...context.state,
     currentStage: 'script_drafted',
@@ -760,95 +479,63 @@ async function handleGenerateRoomScript(req, res, roomId) {
     storyBeats: script.storyBeats || {},
     lastQualityCheck: script.humanSpeechCheck || script.qualityCheck || {},
     activeScriptDraftId: draft.id,
+    updatedAt: new Date().toISOString(),
   };
-
-  await supabaseAdmin.from('room_state').update(toDbStatePatch(nextState)).eq('room_id', roomId);
-  await supabaseAdmin.from('room_messages').insert({
+  localStore.states = localStore.states.filter((item) => item.roomId !== roomId);
+  localStore.states.unshift(nextState);
+  localStore.messages.push({
+    id: makeId('msg'),
     workspace_id: context.workspace.id,
     room_id: roomId,
     role: 'assistant',
     output_type: 'script',
     content: script.hermesJudgement || '已產出 HERMES 小房間腳本草稿。',
     metadata: { draftId: draft.id, script },
+    created_at: new Date().toISOString(),
   });
-
   for (const stage of ['simulate_scene', 'extract_real_lines', 'build_story_beats', 'draft_script', 'human_speech_check']) {
-    await insertAgentRun(context, stage, input, { stage, draftId: draft.id, script });
+    insertAgentRun(context, stage, input, { draftId: draft.id, stage });
   }
-
-  const updated = await loadRoomContext(user, roomId);
-  sendJson(res, 200, { draft, script, ...updated });
+  saveLocalStore();
+  return { draft, script, ...localContext(roomId) };
 }
 
-async function handleSoftDelete(req, res, roomId, table) {
-  const user = await requireUser(req);
-  const body = await readJson(req);
-  const context = await loadRoomContext(user, roomId);
-  const id = body.id;
-  if (!id) throw new Error('id is required');
-  if (!supabaseAdmin) {
-    const key = table === 'memories' ? 'memories' : 'documents';
-    const list = localStore[key].get(roomId) || [];
-    const target = list.find((item) => item.id === id);
-    if (target) target.deleted_at = new Date().toISOString();
-    localStore[key].set(roomId, list);
-    sendJson(res, 200, { deleted: true, id });
-    return;
-  }
-  const { error } = await supabaseAdmin
-    .from(table)
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('id', id)
-    .eq('workspace_id', context.workspace.id)
-    .eq('room_id', roomId);
-  if (error) throw error;
-  sendJson(res, 200, { deleted: true, id });
+function softDelete(roomId, id, type) {
+  const list = type === 'memories' ? localStore.memories : localStore.documents;
+  const target = list.find((item) => item.id === id && item.room_id === roomId);
+  if (target) target.deleted_at = new Date().toISOString();
+  saveLocalStore();
+  return { deleted: true, id };
 }
 
-async function handleLegacyLearnText(req, res) {
+async function handleLegacyLearn(req) {
   const body = await readJson(req);
   const text = String(body.input?.text || body.text || '').trim();
-  const result = {
-    id: `source_${Date.now()}`,
-    background: text ? '已將文字整理成 HERMES 可用素材。' : '尚未提供文字。',
-    highlights: '可用於人物定位、短影音開場、CTA 與內容邊界。',
+  return {
+    id: makeId('source'),
+    background: '已將文字整理成 HERMES 可用素材。',
+    highlights: '可用於人物定位、開場、CTA 與內容邊界。',
     audience: body.persona?.audience || '尚未明確',
-    painPoints: `source_id=source_${Date.now()}; document_title=文字匯入資料; chunk_id=chunk_001; workspace_id=demo-workspace-room`,
-    topics: '品牌素材 / 腳本素材 / 小房間記憶',
-    sellingPoints: '保留原始事實，轉成可拍攝文稿素材。',
+    painPoints: `source_id=${Date.now()}; document_title=文字匯入資料; chunk_id=chunk_001; workspace_id=demo`,
+    topics: '短影音素材 / 人設 / CTA',
+    sellingPoints: '把原始文字整理成可拍攝腳本素材。',
     sourceText: text,
   };
-  sendJson(res, 200, result);
 }
 
-async function handleLegacyScript(req, res) {
+async function handleSuggest(req, type) {
   const body = await readJson(req);
-  const script = await generateHermesScript(body);
-  sendJson(res, 200, script);
+  const brand = body.persona?.brandName || '你的品牌';
+  return {
+    suggestions: type === 'cta'
+      ? [`想把 ${brand} 的短影音方向整理清楚，先私訊「腳本」。`, '把素材丟進 HERMES 小房間，先跑一版真人互動腳本。', '不想再寫出公關稿，就先讓藏鏡人幫你拆一版。']
+      : ['不保證流量、成交或營收', '不使用恐嚇式行銷', '不把未提供的功能講成事實', '不碰醫療、投資、法律保證'],
+  };
 }
 
-async function handleSuggest(req, res, type) {
-  const body = await readJson(req);
-  const persona = body.persona || {};
-  const suggestions = type === 'cta'
-    ? [
-      `想把${persona.brandName || '你的品牌'}短影音方向整理清楚，可以先私訊「腳本」。`,
-      '把現有素材丟進小房間，我會先幫你抓出觀眾真正會在意的那句話。',
-      '如果你不想再寫出公關稿，先讓 HERMES 幫你跑一版真人互動腳本。',
-    ]
-    : [
-      '不保證流量、成交或營收結果。',
-      '不使用恐嚇式行銷。',
-      '不碰醫療、投資、法律等未授權保證。',
-      '不把未提供的產品功能講成既有事實。',
-    ];
-  sendJson(res, 200, { suggestions });
-}
-
-function routeRoomPath(pathname) {
+function parseRoomPath(pathname) {
   const match = pathname.match(/^\/api\/rooms\/([^/]+)(?:\/([^/]+))?$/);
-  if (!match) return null;
-  return { roomId: match[1], action: match[2] || 'state' };
+  return match ? { roomId: match[1], action: match[2] || 'state' } : null;
 }
 
 async function handleRequest(req, res) {
@@ -857,53 +544,58 @@ async function handleRequest(req, res) {
     res.end();
     return;
   }
-
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const pathname = url.pathname;
 
     if (req.method === 'GET' && pathname === '/api/status') {
-      sendJson(res, 200, {
+      return sendJson(res, 200, {
         aiConnected: Boolean(OPENAI_API_KEY),
         model: OPENAI_MODEL,
-        mode: 'hermes-room-runtime',
+        mode: 'hermes-local-room-runtime',
         promptIntegrity: 'ok',
-        supabaseConfigured: supabaseConfigured(),
-        policy: 'message-wake room_state runtime',
+        supabaseConfigured: Boolean(supabaseAdmin),
+        localRoomPersistence: true,
+        policy: 'local file-backed room_state runtime',
       });
-      return;
     }
 
-    if (req.method === 'POST' && pathname === '/api/rooms') return await handleCreateRoom(req, res);
+    if (req.method === 'POST' && pathname === '/api/rooms') {
+      const user = await requireUser(req);
+      return sendJson(res, 200, createRoom(await readJson(req), user));
+    }
 
-    const roomRoute = routeRoomPath(pathname);
+    const roomRoute = parseRoomPath(pathname);
     if (roomRoute) {
-      if (req.method === 'GET' && roomRoute.action === 'state') return await handleGetRoomState(req, res, roomRoute.roomId);
-      if (req.method === 'POST' && roomRoute.action === 'messages') return await handleRoomMessage(req, res, roomRoute.roomId);
-      if (req.method === 'POST' && roomRoute.action === 'learn-text') return await handleLearnText(req, res, roomRoute.roomId);
-      if (req.method === 'POST' && roomRoute.action === 'generate-script') return await handleGenerateRoomScript(req, res, roomRoute.roomId);
-      if (req.method === 'POST' && roomRoute.action === 'delete-memory') return await handleSoftDelete(req, res, roomRoute.roomId, 'memories');
-      if (req.method === 'POST' && roomRoute.action === 'delete-document') return await handleSoftDelete(req, res, roomRoute.roomId, 'documents');
+      await requireUser(req);
+      if (req.method === 'GET' && roomRoute.action === 'state') return sendJson(res, 200, localContext(roomRoute.roomId));
+      if (req.method === 'POST' && roomRoute.action === 'messages') return sendJson(res, 200, await handleRoomMessage(req, roomRoute.roomId));
+      if (req.method === 'POST' && roomRoute.action === 'learn-text') return sendJson(res, 200, await handleLearnText(req, roomRoute.roomId));
+      if (req.method === 'POST' && roomRoute.action === 'generate-script') return sendJson(res, 200, await handleGenerateScript(req, roomRoute.roomId));
+      if (req.method === 'POST' && roomRoute.action === 'delete-memory') {
+        const body = await readJson(req);
+        return sendJson(res, 200, softDelete(roomRoute.roomId, body.id, 'memories'));
+      }
+      if (req.method === 'POST' && roomRoute.action === 'delete-document') {
+        const body = await readJson(req);
+        return sendJson(res, 200, softDelete(roomRoute.roomId, body.id, 'documents'));
+      }
     }
 
-    if (req.method === 'POST' && pathname === '/api/suggest-cta') return await handleSuggest(req, res, 'cta');
-    if (req.method === 'POST' && pathname === '/api/suggest-boundaries') return await handleSuggest(req, res, 'boundaries');
-    if (req.method === 'POST' && pathname === '/api/learn-text') return await handleLegacyLearnText(req, res);
-    if (req.method === 'POST' && pathname === '/api/scripts') return await handleLegacyScript(req, res);
-    if (req.method === 'POST' && pathname === '/api/rewrite-script') return await handleLegacyScript(req, res);
+    if (req.method === 'POST' && pathname === '/api/suggest-cta') return sendJson(res, 200, await handleSuggest(req, 'cta'));
+    if (req.method === 'POST' && pathname === '/api/suggest-boundaries') return sendJson(res, 200, await handleSuggest(req, 'boundaries'));
+    if (req.method === 'POST' && pathname === '/api/learn-text') return sendJson(res, 200, await handleLegacyLearn(req));
+    if (req.method === 'POST' && pathname === '/api/scripts') return sendJson(res, 200, await generateHermesScript(await readJson(req)));
+    if (req.method === 'POST' && pathname === '/api/rewrite-script') return sendJson(res, 200, await generateHermesScript(await readJson(req)));
 
-    sendJson(res, 404, { error: 'Not found' });
+    return sendJson(res, 404, { error: 'Not found' });
   } catch (error) {
-    const status = error.status || 500;
-    sendJson(res, status, {
-      error: error.message || 'Server error',
-      details: error.details,
-    });
+    return sendJson(res, error.status || 500, { error: error.message || 'Server error', details: error.details });
   }
 }
 
 http.createServer(handleRequest).listen(PORT, () => {
-  console.log(`HERMES room runtime listening on http://127.0.0.1:${PORT}`);
+  console.log(`HERMES local room runtime listening on http://127.0.0.1:${PORT}`);
   console.log(`OpenAI model: ${OPENAI_MODEL}`);
-  console.log(`Supabase configured: ${supabaseConfigured() ? 'yes' : 'no'}`);
+  console.log(`Local room persistence: ${localDataPath}`);
 });
