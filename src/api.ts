@@ -37,9 +37,12 @@ export interface UrlLearningResult {
 }
 
 export interface ScriptParams {
+  videoBrief: string;
   platform: string;
   purpose: string;
   scriptStyle: string;
+  shootingType: string;
+  soundDesign: string;
   durationSeconds: number;
   tones: string[];
   roles: string[];
@@ -49,16 +52,50 @@ export interface ScriptParams {
 export interface ScriptBlock {
   time: string;
   visual: string;
-  audio: string;
-  speaker?: string;
+  audio?: string;
+  speaker?: string | null;
+  shotType?: string;
+  action?: string;
+  naturalSound?: string;
+  subtitle?: string;
+  line?: string | null;
+  voiceover?: string | null;
+  lineIntent?: string;
+  motivation?: string;
+  subtext?: string;
+  note?: string;
 }
 
 export interface QualityCheck {
-  hook: string;
-  interaction: string;
-  cta: string;
-  shootability: string;
-  risk: string;
+  hook?: string;
+  interaction?: string;
+  cta?: string;
+  shootability?: string;
+  risk?: string;
+  ctaPlacementOk?: boolean;
+  ctaOccurrences?: number;
+  forbiddenBoundaryUsedAsContent?: boolean;
+  forbiddenPhraseLeak?: boolean;
+  templateRisk?: string;
+}
+
+export interface SourceTaxonomy {
+  topicTask?: { value?: string; source?: string };
+  audiencePainPoints?: Array<{ pain?: string; evidence?: string; source?: string }>;
+  audienceQuestions?: Array<{ question?: string; source?: string }>;
+  usableFacts?: Array<{ fact?: string; source?: string; citation?: string }>;
+  sceneMaterials?: Array<{ material?: string; type?: string }>;
+  safetyBoundaries?: Array<{ rule?: string; reason?: string }>;
+  forbiddenPhrases?: Array<{ phrase?: string; scope?: string }>;
+  ctaInstruction?: {
+    finalText?: string;
+    intent?: string;
+    placement?: string;
+    maxOccurrences?: number;
+    allowParaphraseInMiddle?: boolean;
+  };
+  citations?: Array<{ source_id?: string; document_title?: string; chunk_id?: string; workspace_id?: string }>;
+  needsReview?: string[];
 }
 
 export interface PublicResearch {
@@ -77,11 +114,100 @@ export interface RehearsalLine {
 }
 
 export interface StoryBeats {
+  [key: string]: string | undefined;
   hook?: string;
   setup?: string;
   conflict?: string;
   turningPoint?: string;
   ending?: string;
+}
+
+export interface CreativeDiagnosis {
+  narrativeMode?: string;
+  rehearsalType?: string;
+  reason?: string;
+  structure?: string[];
+  sceneStrategy?: {
+    place?: string;
+    peopleRelationship?: string;
+    firstAction?: string;
+    progression?: string;
+    avoidTemplate?: string;
+  };
+}
+
+export interface CharacterSetup {
+  name?: string;
+  role?: string;
+  personality?: string;
+  surfaceGoal?: string;
+  hiddenFear?: string;
+  desire?: string;
+  defenseMechanism?: string;
+  statusConcern?: string;
+  livedExperience?: string;
+  speechHabit?: string[];
+  forbiddenVoice?: string[];
+}
+
+export interface DramaticSetup {
+  characters?: CharacterSetup[];
+  relationship?: {
+    type?: string;
+    trustStatus?: string;
+    powerBalance?: string;
+    hiddenAgenda?: string;
+  };
+  beforeMoment?: string;
+  triggerEvent?: string;
+  tension?: {
+    surfaceConflict?: string;
+    realConflict?: string;
+    emotionalStakes?: string;
+  };
+  turningMoment?: {
+    moment?: string;
+    whyItChangesSomething?: string;
+  };
+  pointOfView?: string;
+  entertainmentHooks?: {
+    roast?: string[];
+    counterIntuitive?: string[];
+    dramaticEvent?: string[];
+    awkwardMoment?: string[];
+  };
+  lineIntentMap?: Array<{
+    beatId?: string;
+    speaker?: string;
+    lineFunction?: string;
+    characterMotivation?: string;
+    notAllowedToBe?: string;
+  }>;
+}
+
+export interface PerformanceRehearsal {
+  rawImprov?: Array<{ speaker?: string; line?: string; motivation?: string; subtext?: string }>;
+  keeperLines?: string[];
+  discardedLines?: Array<{ line?: string; reason?: string }>;
+}
+
+export interface PerformanceCheck {
+  performanceMode?: 'pass' | 'fail' | 'rewritten' | string;
+  explanationMachineRisk?: 'low' | 'medium' | 'high' | string;
+  characterDistinctness?: 'low' | 'medium' | 'high' | string;
+  dramaticTension?: 'low' | 'medium' | 'high' | string;
+  motivationCoverage?: {
+    totalLines?: number;
+    motivatedLines?: number;
+    weakLines?: Array<{
+      blockIndex?: number;
+      speaker?: string;
+      line?: string;
+      issue?: 'pureExplanation' | 'questionAnswerPattern' | 'noCharacterMotivation' | 'sameVoice' | 'ctaLeak' | string;
+    }>;
+  };
+  rewriteTriggered?: boolean;
+  rewriteReason?: string;
 }
 
 export interface PublishPack {
@@ -108,6 +234,11 @@ export interface ScriptData {
   safetyCheck?: string;
   citations?: string[];
   publicResearch?: PublicResearch | null;
+  sourceTaxonomy?: SourceTaxonomy;
+  creativeDiagnosis?: CreativeDiagnosis;
+  dramaticSetup?: DramaticSetup;
+  performanceRehearsal?: PerformanceRehearsal;
+  performanceCheck?: PerformanceCheck;
   rehearsalPreview?: RehearsalLine[];
   realLines?: string[];
   storyBeats?: StoryBeats;
@@ -128,6 +259,11 @@ interface HermesScriptResponse {
   safetyCheck?: string;
   citations?: string[];
   publicResearch?: PublicResearch | null;
+  sourceTaxonomy?: SourceTaxonomy;
+  creativeDiagnosis?: CreativeDiagnosis;
+  dramaticSetup?: DramaticSetup;
+  performanceRehearsal?: PerformanceRehearsal;
+  performanceCheck?: PerformanceCheck;
   rehearsalPreview?: RehearsalLine[];
   realLines?: string[];
   storyBeats?: StoryBeats;
@@ -361,6 +497,11 @@ export const api = {
       safetyCheck: result.safetyCheck,
       citations: markDeletedCitations(result.citations),
       publicResearch: result.publicResearch,
+      sourceTaxonomy: result.sourceTaxonomy,
+      creativeDiagnosis: result.creativeDiagnosis,
+      dramaticSetup: result.dramaticSetup,
+      performanceRehearsal: result.performanceRehearsal,
+      performanceCheck: result.performanceCheck,
       rehearsalPreview: result.rehearsalPreview,
       realLines: result.realLines,
       storyBeats: result.storyBeats,
@@ -388,6 +529,11 @@ export const api = {
       createdAt: new Date().toISOString(),
       blocks: result.blocks?.length ? result.blocks : script.blocks,
       hermesJudgement: result.hermesJudgement || script.hermesJudgement,
+      sourceTaxonomy: result.sourceTaxonomy || script.sourceTaxonomy,
+      creativeDiagnosis: result.creativeDiagnosis || script.creativeDiagnosis,
+      dramaticSetup: result.dramaticSetup || script.dramaticSetup,
+      performanceRehearsal: result.performanceRehearsal || script.performanceRehearsal,
+      performanceCheck: result.performanceCheck || script.performanceCheck,
       rehearsalPreview: result.rehearsalPreview || script.rehearsalPreview,
       realLines: result.realLines || script.realLines,
       storyBeats: result.storyBeats || script.storyBeats,
