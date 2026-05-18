@@ -1,19 +1,53 @@
 import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
-import { api, MemoryData, PersonaData, ScriptData, ScriptParams, StatusResponse, UrlLearningResult } from '../api';
+import {
+  api,
+  authApi,
+  AuthUser,
+  MemoryData,
+  PersonaData,
+  roomApi,
+  Room,
+  RoomMessage,
+  RoomState,
+  ScriptData,
+  ScriptDraft,
+  ScriptParams,
+  StatusResponse,
+  UrlLearningResult,
+} from '../api';
+
+type ActiveView = 'persona' | 'learn-url' | 'room' | 'workbench' | 'library';
 
 interface AppState {
-  activeView: 'persona' | 'learn-url' | 'workbench' | 'library';
+  activeView: ActiveView;
   status: StatusResponse | null;
   persona: PersonaData | null;
   learnedUrls: UrlLearningResult[];
   scripts: ScriptData[];
   memories: MemoryData[];
   isLoading: boolean;
+  authUser: AuthUser | null;
+  authToken: string | null;
+  authError: string | null;
+  room: Room | null;
+  roomState: RoomState | null;
+  roomMessages: RoomMessage[];
+  roomDrafts: ScriptDraft[];
+  roomDocuments: any[];
 }
 
 interface AppContextType extends AppState {
-  setActiveView: (view: AppState['activeView']) => void;
+  setActiveView: (view: ActiveView) => void;
   loadInitialState: () => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  ensureRoom: () => Promise<void>;
+  sendRoomMessage: (content: string) => Promise<void>;
+  learnRoomText: (text: string) => Promise<void>;
+  generateRoomScript: (params?: ScriptParams) => Promise<void>;
+  deleteRoomMemory: (id: string) => Promise<void>;
+  deleteRoomDocument: (id: string) => Promise<void>;
   updatePersona: (data: Partial<PersonaData>) => Promise<void>;
   suggestCta: (data: Partial<PersonaData>) => Promise<string[]>;
   suggestBoundaries: (data: Partial<PersonaData>) => Promise<string[]>;
@@ -28,23 +62,51 @@ interface AppContextType extends AppState {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+function mergeRoomResponse(prev: AppState, response: any): AppState {
+  const state = response.state || prev.roomState;
+  return {
+    ...prev,
+    room: response.room || prev.room,
+    roomState: state || null,
+    roomMessages: response.messages || prev.roomMessages,
+    roomDrafts: response.drafts || prev.roomDrafts,
+    roomDocuments: response.documents || prev.roomDocuments,
+    memories: response.memories
+      ? response.memories.map((memory: any) => ({ id: memory.id, content: memory.content, createdAt: memory.created_at, deletedAt: memory.deleted_at }))
+      : prev.memories,
+  };
+}
+
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [state, setState] = useState<AppState>({
-    activeView: 'workbench',
+    activeView: 'room',
     status: null,
     persona: null,
     learnedUrls: [],
     scripts: [],
     memories: [],
     isLoading: true,
+    authUser: null,
+    authToken: null,
+    authError: null,
+    room: null,
+    roomState: null,
+    roomMessages: [],
+    roomDrafts: [],
+    roomDocuments: [],
   });
+
+  const applyRoomResponse = (response: any) => {
+    setState((prev) => mergeRoomResponse(prev, response));
+  };
 
   const loadInitialState = async () => {
     setState((prev) => ({ ...prev, isLoading: true }));
     try {
-      const [status, fullState] = await Promise.all([
+      const [status, fullState, session] = await Promise.all([
         api.getStatus(),
         api.getState(),
+        authApi.getSession(),
       ]);
       setState((prev) => ({
         ...prev,
@@ -53,12 +115,87 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         learnedUrls: fullState.learnedUrls,
         scripts: fullState.scripts,
         memories: fullState.memories,
+        authUser: session?.user || null,
+        authToken: session?.access_token || null,
         isLoading: false,
       }));
     } catch (error) {
-      console.error(error);
-      setState((prev) => ({ ...prev, isLoading: false }));
+      setState((prev) => ({
+        ...prev,
+        authError: error instanceof Error ? error.message : String(error),
+        isLoading: false,
+      }));
     }
+  };
+
+  const signIn = async (email: string, password: string) => {
+    const session = await authApi.signIn(email, password);
+    setState((prev) => ({ ...prev, authUser: session?.user || null, authToken: session?.access_token || null, authError: null }));
+  };
+
+  const signUp = async (email: string, password: string) => {
+    const session = await authApi.signUp(email, password);
+    setState((prev) => ({ ...prev, authUser: session?.user || null, authToken: session?.access_token || null, authError: null }));
+  };
+
+  const signOut = async () => {
+    await authApi.signOut();
+    setState((prev) => ({ ...prev, authUser: null, authToken: null, room: null, roomState: null, roomMessages: [], roomDrafts: [] }));
+  };
+
+  const ensureRoom = async () => {
+    const token = state.authToken;
+    if (!token) throw new Error('請先登入 Supabase Auth。');
+    if (state.room) {
+      const response = await roomApi.getState(state.room.id, token);
+      applyRoomResponse(response);
+      return;
+    }
+    const response = await roomApi.createRoom(token);
+    applyRoomResponse(response);
+  };
+
+  const sendRoomMessage = async (content: string) => {
+    const token = state.authToken;
+    const roomId = state.room?.id;
+    if (!token || !roomId) throw new Error('請先建立 HERMES 小房間。');
+    const response = await roomApi.sendMessage(roomId, token, content);
+    applyRoomResponse(response);
+  };
+
+  const learnRoomText = async (text: string) => {
+    const token = state.authToken;
+    const roomId = state.room?.id;
+    if (!token || !roomId) throw new Error('請先建立 HERMES 小房間。');
+    const response = await roomApi.learnText(roomId, token, text);
+    const updated = await roomApi.getState(roomId, token);
+    applyRoomResponse({ ...response, ...updated });
+  };
+
+  const generateRoomScript = async (params?: ScriptParams) => {
+    const token = state.authToken;
+    const roomId = state.room?.id;
+    if (!token || !roomId) throw new Error('請先建立 HERMES 小房間。');
+    const response = await roomApi.generateScript(roomId, token, state.persona!, params);
+    applyRoomResponse(response);
+  };
+
+  const deleteRoomMemory = async (id: string) => {
+    const token = state.authToken;
+    const roomId = state.room?.id;
+    if (!token || !roomId) throw new Error('請先建立 HERMES 小房間。');
+    await roomApi.deleteMemory(roomId, token, id);
+    const response = await roomApi.getState(roomId, token);
+    applyRoomResponse(response);
+  };
+
+  const deleteRoomDocument = async (id: string) => {
+    const token = state.authToken;
+    const roomId = state.room?.id;
+    if (!token || !roomId) throw new Error('請先建立 HERMES 小房間。');
+    await roomApi.deleteDocument(roomId, token, id);
+    const response = await roomApi.getState(roomId, token);
+    applyRoomResponse(response);
   };
 
   const updatePersona = async (data: Partial<PersonaData>) => {
@@ -105,19 +242,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (updated) {
       setState((prev) => ({
         ...prev,
-        scripts: prev.scripts.map((script) => script.id === id ? updated : script),
+        scripts: prev.scripts.map((script) => (script.id === id ? updated : script)),
       }));
     }
   };
 
   useEffect(() => {
     loadInitialState();
+    const sub = authApi.onAuthStateChange((session) => {
+      setState((prev) => ({
+        ...prev,
+        authUser: session?.user || null,
+        authToken: session?.access_token || null,
+      }));
+    });
+    return () => sub.unsubscribe();
   }, []);
 
   const value: AppContextType = {
     ...state,
     setActiveView: (view) => setState((prev) => ({ ...prev, activeView: view })),
     loadInitialState,
+    signIn,
+    signUp,
+    signOut,
+    ensureRoom,
+    sendRoomMessage,
+    learnRoomText,
+    generateRoomScript,
+    deleteRoomMemory,
+    deleteRoomDocument,
     updatePersona,
     suggestCta: api.suggestCta,
     suggestBoundaries: api.suggestBoundaries,

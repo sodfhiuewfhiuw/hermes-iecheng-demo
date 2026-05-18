@@ -1,81 +1,33 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useState } from 'react';
+import { Clock, MessageSquare, RefreshCw, Users, Wand2 } from 'lucide-react';
+import { ScriptParams } from '../api';
 import { useAppContext } from '../store/AppContext';
-import { ScriptParams, StoryBeats } from '../api';
-import { BrainCircuit, CheckCircle2, Clock, FileText, Globe2, MessageSquare, RefreshCw, ShieldCheck, Target, Users, Volume2, Wand2 } from 'lucide-react';
 
 const PLATFORM_OPTIONS = ['Reels', 'TikTok/抖音', 'YouTube Shorts', 'Facebook Reels', '多平台'];
 const PURPOSE_OPTIONS = ['曝光', '建立信任', '教育教學', '破除誤解', '引導私訊', '成交轉換', '活動宣傳', '品牌記憶點'];
-const SCRIPT_STYLE_OPTIONS = ['一人口播', '雙人對話', '三人討論', '店員客人互動', '街訪問答', '案例拆解', '藏鏡人操盤'];
-const TONE_OPTIONS = ['自然口語', '哥們專業', '台灣口語', '藏鏡人補刀', '心裡OS', '靠北現場', '溫柔專業', '犀利分析', '更有鉤子', '更強CTA'];
-const REWRITE_ACTIONS = ['更像真人', '加強心裡OS', '加強藏鏡人補刀', '加強衝突', '縮短句子', '加強CTA'];
+const STYLE_OPTIONS = ['單人口播', '雙人對話', '三人討論', '店員客人互動', '街訪問答', '藏鏡人拆解'];
+const TONE_OPTIONS = ['自然口語', '專業可信', '生活感', '幽默吐槽', '溫柔陪伴', '犀利分析', '台灣在地感', '更有鉤子', '更強 CTA'];
 
-function defaultRolesForStyle(style: string) {
-  switch (style) {
-    case '一人口播':
-      return ['主角'];
-    case '三人討論':
-      return ['主持人', '客戶', '藏鏡人'];
-    case '店員客人互動':
-      return ['店員', '客人', '旁白'];
-    case '街訪問答':
-      return ['訪問者', '路人', '旁白'];
-    case '案例拆解':
-      return ['品牌主', '客戶', '藏鏡人'];
-    case '藏鏡人操盤':
-      return ['IE程', '品牌主', '藏鏡人'];
-    case '雙人對話':
-    default:
-      return ['品牌主', '藏鏡人'];
-  }
-}
-
-function qualityEntries(check?: any) {
-  if (!check) return [];
-  return [
-    ['開場鉤子', check.hook],
-    ['角色互動 / 衝突', check.interaction],
-    ['CTA 是否明確', check.cta],
-    ['是否可拍攝', check.shootability],
-    ['禁語 / 誇大風險', check.risk],
-    ['人味口語檢查', check.humanSpeech],
-  ].filter(([, value]) => Boolean(value));
-}
-
-function beatEntries(beats?: StoryBeats) {
-  if (!beats) return [];
-  return [
-    ['Hook', beats.hook],
-    ['Setup', beats.setup],
-    ['Conflict', beats.conflict],
-    ['Turning Point', beats.turningPoint],
-    ['Ending', beats.ending],
-  ].filter(([, value]) => Boolean(value));
+function defaultRoles(style: string) {
+  if (style === '三人討論') return ['主持人', '客戶', '藏鏡人'];
+  if (style === '店員客人互動') return ['店員', '客人', '旁白'];
+  if (style === '街訪問答') return ['訪問者', '路人', '旁白'];
+  if (style === '單人口播') return ['藏鏡人'];
+  return ['品牌主', '藏鏡人'];
 }
 
 export const ScriptWorkbenchView: React.FC = () => {
-  const { generateScript, rewriteScript, addMemory, scripts, persona, learnedUrls, setActiveView } = useAppContext();
+  const { generateScript, rewriteScript, addMemory, scripts, persona, setActiveView } = useAppContext();
   const [params, setParams] = useState<ScriptParams>({
-    platform: 'Reels',
+    platform: '多平台',
     purpose: '建立信任',
     scriptStyle: '雙人對話',
-    durationSeconds: 30,
-    tones: persona?.tones?.length ? persona.tones : ['自然口語', '藏鏡人補刀'],
-    roles: defaultRolesForStyle('雙人對話'),
-    usePublicResearch: false,
+    durationSeconds: 45,
+    tones: persona?.tones?.length ? persona.tones : ['自然口語', '台灣在地感'],
+    roles: ['品牌主', '藏鏡人'],
   });
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [rewritingId, setRewritingId] = useState<string | null>(null);
-
+  const [busy, setBusy] = useState(false);
   const currentScript = scripts[0];
-  const roleText = params.roles.join('、');
-  const qualityList = useMemo(() => qualityEntries(currentScript?.qualityCheck), [currentScript?.qualityCheck]);
-  const storyBeatList = useMemo(() => beatEntries(currentScript?.storyBeats), [currentScript?.storyBeats]);
-
-  useEffect(() => {
-    if (persona?.tones?.length) {
-      setParams((prev) => ({ ...prev, tones: Array.from(new Set([...persona.tones, ...prev.tones])) }));
-    }
-  }, [persona?.tones]);
 
   const toggleTone = (tone: string) => {
     setParams((prev) => ({
@@ -84,40 +36,16 @@ export const ScriptWorkbenchView: React.FC = () => {
     }));
   };
 
-  const updateScriptStyle = (scriptStyle: string) => {
-    setParams((prev) => ({ ...prev, scriptStyle, roles: defaultRolesForStyle(scriptStyle) }));
-  };
-
-  const updateRoles = (value: string) => {
-    const roles = value.split(/[、,\n]/).map((item) => item.trim()).filter(Boolean);
-    setParams((prev) => ({ ...prev, roles }));
+  const updateStyle = (scriptStyle: string) => {
+    setParams((prev) => ({ ...prev, scriptStyle, roles: defaultRoles(scriptStyle) }));
   };
 
   const handleGenerate = async () => {
-    setIsGenerating(true);
+    setBusy(true);
     try {
       await generateScript(params);
     } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleRewrite = async (action: string) => {
-    if (!currentScript) return;
-    setRewritingId(action);
-    try {
-      await rewriteScript(currentScript.id, action);
-    } finally {
-      setRewritingId(null);
-    }
-  };
-
-  const handleAddMemory = async () => {
-    if (!currentScript) return;
-    const memory = window.prompt('加入一筆會影響後續腳本的 workspace 記憶：');
-    if (memory) {
-      await addMemory(memory);
-      window.alert('已加入 workspace 記憶。');
+      setBusy(false);
     }
   };
 
@@ -126,13 +54,11 @@ export const ScriptWorkbenchView: React.FC = () => {
       <header className="view-header flow-header">
         <div>
           <h1 className="view-title">腳本工作台</h1>
-          <p className="view-subtitle">HERMES 會先建立 voice_dna，再模擬現場，最後才產出完整拍攝版。這裡測的是 TG 小房間口語感。</p>
+          <p className="view-subtitle">保留表單式 fallback。正式小房間請使用「HERMES 小房間」入口，讓腳本讀取 room_state。</p>
         </div>
-        <div className="flow-pills">
-          <span>1 人設</span>
-          <span>2 學習</span>
-          <span className="active">3 腳本</span>
-        </div>
+        <button className="btn btn-secondary" type="button" onClick={() => setActiveView('room')}>
+          <MessageSquare size={16} /> 前往小房間
+        </button>
       </header>
 
       <div className="view-content workbench-layout">
@@ -140,43 +66,38 @@ export const ScriptWorkbenchView: React.FC = () => {
           <h2 className="card-header">產出條件</h2>
 
           <div className="form-group">
-            <label className="form-label"><FileText size={14} /> 平台</label>
+            <label className="form-label">平台</label>
             <select className="input-field" value={params.platform} onChange={(event) => setParams({ ...params, platform: event.target.value })}>
-              {PLATFORM_OPTIONS.map((platform) => <option key={platform}>{platform}</option>)}
+              {PLATFORM_OPTIONS.map((item) => <option key={item}>{item}</option>)}
             </select>
           </div>
 
           <div className="form-group">
-            <label className="form-label"><Target size={14} /> 影片目的</label>
+            <label className="form-label">影片目的</label>
             <select className="input-field" value={params.purpose} onChange={(event) => setParams({ ...params, purpose: event.target.value })}>
-              {PURPOSE_OPTIONS.map((purpose) => <option key={purpose}>{purpose}</option>)}
+              {PURPOSE_OPTIONS.map((item) => <option key={item}>{item}</option>)}
             </select>
           </div>
 
           <div className="form-group">
             <label className="form-label"><Users size={14} /> 腳本形式</label>
-            <select className="input-field" value={params.scriptStyle} onChange={(event) => updateScriptStyle(event.target.value)}>
-              {SCRIPT_STYLE_OPTIONS.map((style) => <option key={style}>{style}</option>)}
+            <select className="input-field" value={params.scriptStyle} onChange={(event) => updateStyle(event.target.value)}>
+              {STYLE_OPTIONS.map((item) => <option key={item}>{item}</option>)}
             </select>
-            <p className="field-hint">多數短影音不是單人口播，建議先測雙人對話、三人討論或藏鏡人操盤。</p>
           </div>
 
           <div className="form-group">
-            <label className="form-label"><Users size={14} /> 角色設定</label>
-            <input className="input-field" value={roleText} onChange={(event) => updateRoles(event.target.value)} />
-            <p className="field-hint">可手動改成：老闆、客人、藏鏡人。AI 會用這些角色名產出 speaker。</p>
+            <label className="form-label">角色設定</label>
+            <input className="input-field" value={params.roles.join('、')} onChange={(event) => setParams({ ...params, roles: event.target.value.split(/[、,\n]/).map((item) => item.trim()).filter(Boolean) })} />
           </div>
 
           <div className="form-group">
-            <label className="form-label"><Clock size={14} /> 影片長度 / 秒</label>
-            <div className="range-field">
-              <input type="range" min="10" max="90" step="5" value={params.durationSeconds} onChange={(event) => setParams({ ...params, durationSeconds: Number(event.target.value) })} />
-              <strong>{params.durationSeconds}</strong>
-            </div>
+            <label className="form-label"><Clock size={14} /> 影片長度：{params.durationSeconds} 秒</label>
+            <input type="range" min="10" max="90" step="5" value={params.durationSeconds} onChange={(event) => setParams({ ...params, durationSeconds: Number(event.target.value) })} />
           </div>
 
           <div className="form-group">
-            <label className="form-label"><Volume2 size={14} /> 口吻</label>
+            <label className="form-label">口吻</label>
             <div className="chip-grid compact">
               {TONE_OPTIONS.map((tone) => (
                 <button key={tone} type="button" className={`choice-chip ${params.tones.includes(tone) ? 'selected' : ''}`} onClick={() => toggleTone(tone)}>
@@ -186,190 +107,51 @@ export const ScriptWorkbenchView: React.FC = () => {
             </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label"><Globe2 size={14} /> 公開市場資訊</label>
-            <button className={`choice-chip ${params.usePublicResearch ? 'selected' : ''}`} type="button" onClick={() => setParams((prev) => ({ ...prev, usePublicResearch: !prev.usePublicResearch }))}>
-              {params.usePublicResearch ? '已啟用公開資訊查詢' : '不查公開資訊'}
-            </button>
-            <p className="field-hint">只查公開市場現況與受眾訊號，不把公開資訊寫成品牌承諾。</p>
-          </div>
-
-          <button className="btn btn-primary full-width" onClick={handleGenerate} disabled={isGenerating}>
-            {isGenerating ? <RefreshCw size={16} className="animate-spin" /> : <Wand2 size={16} />}
-            {isGenerating ? 'HERMES 模擬中...' : '讓 HERMES 先模擬再成稿'}
+          <button className="btn btn-primary full-width" type="button" onClick={handleGenerate} disabled={busy}>
+            {busy ? <RefreshCw size={16} className="animate-spin" /> : <Wand2 size={16} />}
+            {busy ? 'HERMES 產出中...' : '產出 Demo 腳本'}
           </button>
         </aside>
 
         <section className="workbench-output">
           {!currentScript ? (
             <div className="card empty-state">
-              <div className="preflight-grid">
-                <div className="preflight-item complete">人設：{persona?.brandName}</div>
-                <div className={`preflight-item ${learnedUrls.length > 0 ? 'complete' : ''}`}>學習資料：{learnedUrls.length} 筆</div>
-                <div className="preflight-item complete">角色：{roleText}</div>
-              </div>
-              <MessageSquare size={40} />
-              <p>先選腳本形式與角色，HERMES 會先跑 voice_dna 與模擬現場，不會直接丟出空泛文案。</p>
-              {learnedUrls.length <= 1 && (
-                <button className="btn btn-secondary btn-sm" type="button" onClick={() => setActiveView('learn-url')}>
-                  先匯入學習資料
-                </button>
-              )}
+              <MessageSquare size={42} />
+              <p>尚未產出腳本。建議先到 HERMES 小房間貼素材，讓它先建立 voice_dna 與真人句。</p>
             </div>
           ) : (
             <div className="script-output-stack">
-              <div className="hermes-brief-grid">
-                <div className="card hermes-brief-card primary">
-                  <div className="section-label"><BrainCircuit size={14} /> HERMES 判斷</div>
-                  <p>{currentScript.hermesJudgement || 'HERMES 已完成初步判斷。'}</p>
-                </div>
-                <div className="card hermes-brief-card">
-                  <div className="section-label">可用素材</div>
-                  <p>{currentScript.usableMaterials || '已從 workspace 學習資料整理可用素材。'}</p>
-                </div>
-                <div className="card hermes-brief-card">
-                  <div className="section-label">缺少資訊</div>
-                  <p>{currentScript.missingInfo || '目前沒有額外缺口。'}</p>
-                </div>
-                <div className="card hermes-brief-card">
-                  <div className="section-label"><ShieldCheck size={14} /> 安全檢查</div>
-                  <p>{currentScript.safetyCheck || '已檢查禁語與內容邊界。'}</p>
-                </div>
-              </div>
-
-              {currentScript.voiceDna && (
-                <div className="card quality-card">
-                  <div className="section-label">0 Voice DNA</div>
-                  <div className="quality-grid">
-                    <div className="quality-item"><strong>第一秒反應</strong><span>{currentScript.voiceDna.firstReactionPatterns?.join(' / ')}</span></div>
-                    <div className="quality-item"><strong>嘴巴實際回法</strong><span>{currentScript.voiceDna.mouthLines?.join(' / ')}</span></div>
-                    <div className="quality-item"><strong>心裡 OS</strong><span>{currentScript.voiceDna.innerOs?.join(' / ')}</span></div>
-                    <div className="quality-item"><strong>節奏</strong><span>{currentScript.voiceDna.rhythm}</span></div>
-                    <div className="quality-item"><strong>信心</strong><span>{currentScript.voiceDna.speechConfidence}</span></div>
-                  </div>
-                </div>
-              )}
-
-              {currentScript.rehearsalPreview && currentScript.rehearsalPreview.length > 0 && (
-                <div className="card script-card">
-                  <div className="section-label">1 模擬現場</div>
-                  <div className="script-block-list">
-                    {currentScript.rehearsalPreview.map((line, index) => (
-                      <div className="script-block" key={`${line.speaker}-${index}`}>
-                        <div className="script-row"><strong>角色</strong><span>{line.speaker}</span></div>
-                        <div className="script-row"><strong>現場</strong><span>{line.line}</span></div>
-                        {line.innerOs ? <div className="script-row"><strong>心裡</strong><span>{line.innerOs}</span></div> : null}
-                        {line.mouthLine ? <div className="script-row"><strong>嘴巴</strong><span>{line.mouthLine}</span></div> : null}
-                        {line.purpose ? <div className="script-row"><strong>目的</strong><span>{line.purpose}</span></div> : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {currentScript.realLines && currentScript.realLines.length > 0 && (
-                <div className="card quality-card">
-                  <div className="section-label">2 真人句</div>
-                  <div className="chip-row">
-                    {currentScript.realLines.map((line) => <span className="badge" key={line}>{line}</span>)}
-                  </div>
-                </div>
-              )}
-
-              {storyBeatList.length > 0 && (
-                <div className="card quality-card">
-                  <div className="section-label">3 故事骨架</div>
-                  <div className="quality-grid">
-                    {storyBeatList.map(([label, value]) => (
-                      <div className="quality-item" key={label}>
-                        <strong>{label}</strong>
-                        <span>{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {currentScript.publicResearch && (
-                <div className="card quality-card">
-                  <div className="section-label"><Globe2 size={14} /> 公開市場資訊</div>
-                  <p>{currentScript.publicResearch.industrySnapshot || '已查詢公開市場資訊。'}</p>
-                  <div className="chip-row">
-                    {(currentScript.publicResearch.audienceSignals || []).slice(0, 4).map((item) => <span className="badge" key={item}>{item}</span>)}
-                    {(currentScript.publicResearch.popularAngles || []).slice(0, 4).map((item) => <span className="badge" key={item}>{item}</span>)}
-                  </div>
-                </div>
-              )}
-
-              {qualityList.length > 0 && (
-                <div className="card quality-card">
-                  <div className="section-label"><CheckCircle2 size={14} /> 腳本品質檢查</div>
-                  <div className="quality-grid">
-                    {qualityList.map(([label, value]) => (
-                      <div className="quality-item" key={label}>
-                        <strong>{label}</strong>
-                        <span>{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="card script-card">
-                <div className="script-card-header">
-                  <div>
-                    <h2 className="card-header">4 完整拍攝版</h2>
-                    <div className="chip-row">
-                      <span className="badge">{currentScript.platform}</span>
-                      <span className="badge">{currentScript.purpose}</span>
-                      <span className="badge">{currentScript.scriptStyle}</span>
-                      <span className="badge">{currentScript.roles.join('、')}</span>
+              <div className="card">
+                <h2 className="card-header">{currentScript.scriptStyle} · {currentScript.purpose}</h2>
+                <p className="compact-text">{currentScript.hermesJudgement}</p>
+                {(currentScript.blocks || []).map((block) => (
+                  <div className="script-block" key={`${block.time}-${block.audio}`}>
+                    <div className="script-time">{block.time}</div>
+                    <div>
+                      <strong>{block.speaker || '旁白'}</strong>
+                      <p>{block.visual}</p>
+                      <p>{block.audio}</p>
                     </div>
                   </div>
-                  <button className="btn btn-secondary btn-sm" onClick={handleAddMemory}>
-                    <BrainCircuit size={14} /> 加入記憶
-                  </button>
-                </div>
+                ))}
+              </div>
 
-                <div className="script-block-list">
-                  {currentScript.blocks.map((block, index) => (
-                    <div key={index} className="script-block">
-                      <div className="script-time">{block.time}</div>
-                      {block.speaker ? <div className="script-row"><strong>角色</strong><span>{block.speaker}</span></div> : null}
-                      <div className="script-row"><strong>畫面</strong><span>{block.visual}</span></div>
-                      <div className="script-row"><strong>台詞</strong><span>{block.audio}</span></div>
+              {currentScript.qualityCheck && (
+                <div className="card">
+                  <h2 className="card-header">品質檢查</h2>
+                  {Object.entries(currentScript.qualityCheck).map(([key, value]) => (
+                    <div className="metric-row" key={key}>
+                      <span>{key}</span>
+                      <strong>{String(value)}</strong>
                     </div>
                   ))}
                 </div>
+              )}
 
-                {currentScript.publishPack && (
-                  <div className="citation-box">
-                    <div className="section-label">5 上片版</div>
-                    {currentScript.publishPack.title ? <p>標題：{currentScript.publishPack.title}</p> : null}
-                    {currentScript.publishPack.subtitleFirstLine ? <p>字幕第一句：{currentScript.publishPack.subtitleFirstLine}</p> : null}
-                    {currentScript.publishPack.cta ? <p>CTA：{currentScript.publishPack.cta}</p> : null}
-                    {currentScript.publishPack.hashtags?.length ? <p>{currentScript.publishPack.hashtags.join(' ')}</p> : null}
-                  </div>
-                )}
-
-                {currentScript.citations && currentScript.citations.length > 0 && (
-                  <div className="citation-box">
-                    <div className="section-label">引用來源</div>
-                    {currentScript.citations.map((citation) => <p key={citation}>{citation}</p>)}
-                  </div>
-                )}
-
-                <div className="rewrite-panel">
-                  <div className="section-label">改寫</div>
-                  <div className="chip-row">
-                    {REWRITE_ACTIONS.map((action) => (
-                      <button key={action} className="btn btn-secondary btn-sm" onClick={() => handleRewrite(action)} disabled={!!rewritingId}>
-                        {rewritingId === action ? <RefreshCw size={12} className="animate-spin" /> : null}
-                        {action}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              <div className="button-row">
+                <button className="btn btn-secondary" type="button" onClick={() => rewriteScript(currentScript.id, '更口語')}>更口語</button>
+                <button className="btn btn-secondary" type="button" onClick={() => rewriteScript(currentScript.id, '加強角色衝突')}>加強角色衝突</button>
+                <button className="btn btn-secondary" type="button" onClick={() => addMemory('使用者偏好多人互動腳本，不要只有單人口播。')}>加入記憶</button>
               </div>
             </div>
           )}

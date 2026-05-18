@@ -1,9 +1,10 @@
 import React from 'react';
 import { useAppContext } from '../store/AppContext';
+import { HermesRoomView } from '../views/HermesRoomView';
 import { PersonaView } from '../views/PersonaView';
-import { UrlLearningView } from '../views/UrlLearningView';
-import { ScriptWorkbenchView } from '../views/ScriptWorkbenchView';
 import { ScriptLibraryView } from '../views/ScriptLibraryView';
+import { ScriptWorkbenchView } from '../views/ScriptWorkbenchView';
+import { UrlLearningView } from '../views/UrlLearningView';
 
 export const MainArea: React.FC = () => {
   const { activeView } = useAppContext();
@@ -14,18 +15,16 @@ export const MainArea: React.FC = () => {
         return <PersonaView />;
       case 'learn-url':
         return <UrlLearningView />;
+      case 'room':
+        return <HermesRoomView />;
       case 'workbench':
         return <ScriptWorkbenchView />;
       case 'library':
         return <ScriptLibraryView />;
       default:
-        return <div>View not found</div>;
+        return <HermesRoomView />;
     }
   };
 
-  return (
-    <main className="main-area">
-      {renderView()}
-    </main>
-  );
+  return <main className="main-area">{renderView()}</main>;
 };

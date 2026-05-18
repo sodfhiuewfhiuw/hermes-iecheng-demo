@@ -1,14 +1,14 @@
 import React from 'react';
 import { AppProvider, useAppContext } from './store/AppContext';
-import { Sidebar } from './components/Sidebar';
 import { ContextPanel } from './components/ContextPanel';
 import { MainArea } from './components/MainArea';
+import { Sidebar } from './components/Sidebar';
 
 const AppContent: React.FC = () => {
   const { isLoading } = useAppContext();
 
   if (isLoading) {
-    return <div className="loading-screen">載入 IE程 Demo...</div>;
+    return <div className="loading-screen">載入 IE程 HERMES Demo...</div>;
   }
 
   return (

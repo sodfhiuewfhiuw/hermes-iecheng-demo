@@ -1,13 +1,20 @@
+import { createClient, Session, User } from '@supabase/supabase-js';
+
+const API_BASE = '';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+
+export const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
 export interface StatusResponse {
-  coreVersion: string;
-  runtime: string;
-  coreMutable: boolean;
-  auth: string;
-  workspaceId: string;
-  isolationMode: string;
-  sourceArtifact: string;
-  aiConnected?: boolean;
-  aiModel?: string;
+  aiConnected: boolean;
+  model: string;
+  mode: string;
+  promptIntegrity?: string;
+  supabaseConfigured?: boolean;
+  policy?: string;
 }
 
 export interface PersonaData {
@@ -34,6 +41,7 @@ export interface UrlLearningResult {
   topics: string;
   sellingPoints: string;
   sourceText?: string;
+  deletedAt?: string | null;
 }
 
 export interface ScriptParams {
@@ -48,9 +56,9 @@ export interface ScriptParams {
 
 export interface ScriptBlock {
   time: string;
+  speaker?: string;
   visual: string;
   audio: string;
-  speaker?: string;
 }
 
 export interface QualityCheck {
@@ -62,30 +70,19 @@ export interface QualityCheck {
   humanSpeech?: string;
 }
 
-export interface PublicResearch {
-  industrySnapshot?: string;
-  audienceSignals?: string[];
-  popularAngles?: string[];
-  platformNotes?: string[];
-  riskNotes?: string[];
-  sources?: string[];
-}
-
 export interface VoiceDna {
-  firstReactionPatterns?: string[];
-  mouthLines?: string[];
-  innerOs?: string[];
-  rhythm?: string;
-  signaturePhrases?: string[];
-  forbiddenVoice?: string[];
-  speechConfidence?: string;
+  brandVoice?: string;
+  speakingRhythm?: string;
+  commonPhrases?: string[];
+  forbiddenTone?: string[];
+  emotionalTexture?: string;
+  personaNotes?: string[];
 }
 
 export interface RehearsalLine {
   speaker: string;
   line: string;
-  innerOs?: string;
-  mouthLine?: string;
+  innerOS?: string;
   purpose?: string;
 }
 
@@ -97,11 +94,27 @@ export interface StoryBeats {
   ending?: string;
 }
 
+export interface PublicResearch {
+  industrySnapshot?: string;
+  audienceSignals?: string[];
+  popularAngles?: string[];
+  citations?: string[];
+}
+
 export interface PublishPack {
   title?: string;
   subtitleFirstLine?: string;
   cta?: string;
   hashtags?: string[];
+}
+
+export interface HumanSpeechCheck {
+  overall?: '通過' | '需補強' | '風險';
+  aiPublicRelationsTone?: string;
+  exaggeratedClaims?: string;
+  forbiddenWords?: string;
+  humanNaturalness?: string;
+  suggestedFixes?: string[];
 }
 
 export interface ScriptData {
@@ -120,238 +133,271 @@ export interface ScriptData {
   missingInfo?: string;
   safetyCheck?: string;
   citations?: string[];
-  publicResearch?: PublicResearch | null;
-  voiceDna?: VoiceDna;
+  qualityCheck?: QualityCheck;
   rehearsalPreview?: RehearsalLine[];
   realLines?: string[];
   storyBeats?: StoryBeats;
+  publicResearch?: PublicResearch;
   publishPack?: PublishPack;
-  qualityCheck?: QualityCheck;
+  humanSpeechCheck?: HumanSpeechCheck;
+  voiceDna?: VoiceDna;
 }
 
 export interface MemoryData {
   id: string;
   content: string;
   createdAt: string;
+  deletedAt?: string | null;
 }
 
-interface HermesScriptResponse {
-  hermesJudgement?: string;
-  usableMaterials?: string;
-  missingInfo?: string;
-  safetyCheck?: string;
-  citations?: string[];
-  publicResearch?: PublicResearch | null;
-  voiceDna?: VoiceDna;
-  rehearsalPreview?: RehearsalLine[];
-  realLines?: string[];
-  storyBeats?: StoryBeats;
-  publishPack?: PublishPack;
-  qualityCheck?: QualityCheck;
-  blocks?: ScriptBlock[];
+export interface Room {
+  id: string;
+  workspace_id: string;
+  title: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomMessage {
+  id: string;
+  workspace_id: string;
+  room_id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  output_type: 'chat' | 'question' | 'simulation' | 'script' | 'quality_check';
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface RoomState {
+  roomId: string;
+  workspaceId: string;
+  currentStage: string;
+  voiceDna: VoiceDna;
+  latestRehearsal: RehearsalLine[];
+  realLines: string[];
+  storyBeats: StoryBeats;
+  openQuestions: string[];
+  lastQualityCheck: HumanSpeechCheck | QualityCheck;
+  activeScriptDraftId: string | null;
+  updatedAt: string;
+}
+
+export interface ScriptDraft {
+  id: string;
+  workspace_id: string;
+  room_id: string;
+  status: string;
+  platform: string;
+  purpose: string;
+  script_style: string;
+  duration_seconds: number;
+  roles: string[];
+  tones: string[];
+  rehearsal_preview: RehearsalLine[];
+  real_lines: string[];
+  story_beats: StoryBeats;
+  blocks: ScriptBlock[];
+  citations: string[];
+  quality_check: QualityCheck;
+  human_speech_check: HumanSpeechCheck;
+  publish_pack: PublishPack;
+  created_at: string;
+}
+
+export interface RoomContextResponse {
+  workspace?: { id: string; name: string; role?: string };
+  room?: Room;
+  state?: RoomState;
+  messages?: RoomMessage[];
+  documents?: any[];
+  memories?: any[];
+  drafts?: ScriptDraft[];
+  script?: Partial<ScriptData>;
 }
 
 const defaultPersona: PersonaData = {
   brandName: 'IE程',
-  industry: '短影音行銷操盤',
-  role: '短影音藏鏡人 / 腳本操盤手',
+  industry: '短影音策略與操盤',
+  role: '短影音腳本生成器',
   audience: '想開始做短影音但不知道怎麼拍的品牌主、個人品牌、在地店家老闆',
-  tones: ['哥們專業', '台灣口語', '藏鏡人補刀'],
-  platforms: ['Instagram Reels', 'YouTube Shorts', '多平台'],
-  forbiddenWords: [
-    '不保證流量、成交或業績結果。',
-    '不使用恐嚇式行銷，不誇大焦慮。',
-    '避免 AI 公關腔：打造完整體驗、有效提升品牌價值、歡迎了解更多。',
-  ].join('\n'),
-  ctaMethod: '想先看你的短影音可以怎麼拍，私訊我「短影音腳本」，我先幫你抓一版方向。',
-  ctaGoal: '引導私訊',
-  ctaKeyword: '短影音腳本',
-  ctaStrength: '自然提醒',
-  ctaNote: '不要硬銷，像藏鏡人順手提醒。',
+  tones: ['自然口語', '專業可信', '台灣在地感'],
+  platforms: ['Instagram Reels', 'YouTube Shorts', 'TikTok/抖音'],
+  forbiddenWords: '不保證流量、成交或營收；不恐嚇式行銷；不把未提供的功能講成事實。',
+  ctaMethod: '把現有素材丟進 HERMES 小房間，先跑一版真人互動腳本。',
+  ctaGoal: '引導私訊或留下資料',
+  ctaKeyword: '腳本',
+  ctaStrength: '中',
+  ctaNote: '不要硬銷，要像藏鏡人在旁邊提醒下一步。',
 };
 
-let currentPersona: PersonaData = { ...defaultPersona };
-let learnedUrls: UrlLearningResult[] = [{
-  id: 'demo_seed',
-  background: 'IE程是短影音腳本與內容操盤助手，重點不是幫品牌寫漂亮文案，而是把資料整理成能拍、能演、能轉換的短影音腳本。',
-  highlights: '核心方法是先模擬現場、抓真人句、建立人設與觀眾衝突，再產出可拍攝腳本與 CTA。',
-  audience: '品牌主、個人品牌、在地店家老闆、想做短影音但不知道怎麼開口的人。',
-  painPoints: 'source_id=demo_seed; document_title=Demo 種子資料; chunk_id=chunk_001; workspace_id=demo-workspace-room',
-  topics: '品牌 / 人設 / 短影音腳本 / 藏鏡人',
-  sellingPoints: '能把零散資料變成短影音腳本、人設方向、觀眾痛點、拍攝段落與 CTA。',
-  sourceText: 'Demo seed',
-}];
-let deletedLearningCitations = new Set<string>();
+let currentPersona = { ...defaultPersona };
+let learnedTexts: UrlLearningResult[] = [];
 let scriptsLibrary: ScriptData[] = [];
 let workspaceMemories: MemoryData[] = [];
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function getServerStatus() {
-  try {
-    const response = await fetch('/api/status');
-    if (!response.ok) return null;
-    return await response.json() as { aiConnected: boolean; model: string; mode: string; policy?: string };
-  } catch {
-    return null;
-  }
-}
-
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+async function request<T>(path: string, options: RequestInit = {}, token?: string | null): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`IE程 API 回應失敗：${text}`);
+    const detail = await response.text();
+    throw new Error(detail || `Request failed: ${response.status}`);
   }
-  return await response.json() as T;
+  return response.json() as Promise<T>;
 }
 
-function fallbackScriptError(reason: string): HermesScriptResponse {
+function toScriptData(script: any, params?: ScriptParams): ScriptData {
   return {
-    hermesJudgement: 'IE程目前沒有拿到 AI 回應，先用本地 fallback 顯示錯誤狀態。',
-    usableMaterials: '請檢查 local AI server、API key 或 server log。',
-    missingInfo: '真實 AI 回應失敗，無法判斷缺少資訊。',
-    safetyCheck: '這是本地 fallback，不會寫入 core。',
-    citations: [],
-    voiceDna: {
-      firstReactionPatterns: [],
-      mouthLines: [],
-      innerOs: [],
-      rhythm: 'AI 回應失敗',
-      signaturePhrases: [],
-      forbiddenVoice: [],
-      speechConfidence: 'low',
-    },
-    rehearsalPreview: [{ speaker: '系統', line: reason, purpose: '錯誤訊息' }],
-    realLines: [],
-    storyBeats: {},
-    publishPack: {},
-    qualityCheck: {
-      hook: '風險：AI 回應失敗。',
-      interaction: '風險：沒有產生角色互動。',
-      cta: '風險：沒有產生 CTA。',
-      shootability: '風險：沒有產生可拍攝腳本。',
-      risk: '風險：請檢查 AI server。',
-      humanSpeech: '風險：未通過人味檢查。',
-    },
-    blocks: [{
-      time: 'AI 回應失敗',
-      speaker: '系統',
-      visual: '請確認 AI server 是否啟動。',
-      audio: reason,
-    }],
+    id: script?.id || crypto.randomUUID(),
+    platform: script?.platform || params?.platform || '多平台',
+    purpose: script?.purpose || params?.purpose || '建立信任',
+    scriptStyle: script?.scriptStyle || params?.scriptStyle || '雙人對話',
+    durationSeconds: script?.durationSeconds || params?.durationSeconds || 45,
+    tones: script?.tones || params?.tones || currentPersona.tones,
+    roles: script?.roles || params?.roles || ['品牌主', '藏鏡人'],
+    blocks: script?.blocks || [],
+    status: 'draft',
+    createdAt: new Date().toISOString(),
+    hermesJudgement: script?.hermesJudgement,
+    usableMaterials: script?.usableMaterials,
+    missingInfo: script?.missingInfo,
+    safetyCheck: script?.safetyCheck,
+    citations: script?.citations || [],
+    qualityCheck: script?.qualityCheck,
+    rehearsalPreview: script?.rehearsalPreview,
+    realLines: script?.realLines,
+    storyBeats: script?.storyBeats,
+    publicResearch: script?.publicResearch,
+    publishPack: script?.publishPack,
+    humanSpeechCheck: script?.humanSpeechCheck,
+    voiceDna: script?.voiceDna,
   };
 }
 
-function withLearningId(result: UrlLearningResult): UrlLearningResult {
-  return {
-    ...result,
-    id: result.id || `learn_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-  };
-}
+export const authApi = {
+  supabaseConfigured: () => Boolean(supabase),
+  getSession: async (): Promise<Session | null> => {
+    if (!supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    return data.session;
+  },
+  onAuthStateChange: (callback: (session: Session | null) => void) => {
+    if (!supabase) return { unsubscribe: () => undefined };
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => callback(session));
+    return data.subscription;
+  },
+  signIn: async (email: string, password: string) => {
+    if (!supabase) throw new Error('Supabase 尚未設定，請先設定 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY。');
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    return data.session;
+  },
+  signUp: async (email: string, password: string) => {
+    if (!supabase) throw new Error('Supabase 尚未設定，請先設定 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY。');
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) throw error;
+    return data.session;
+  },
+  signOut: async () => {
+    if (supabase) await supabase.auth.signOut();
+  },
+};
 
-function markDeletedCitations(citations?: string[]) {
-  return (citations || []).map((citation) => (
-    deletedLearningCitations.has(citation) ? `${citation}（來源已刪除）` : citation
-  ));
-}
-
-function localLearningFallback(input: { url?: string; text?: string }): UrlLearningResult {
-  const sourceId = `source_${Date.now()}`;
-  const text = input.text || input.url || '';
-  return {
-    id: sourceId,
-    background: text ? '已把使用者提供的文字整理成 workspace 學習資料。' : '目前沒有收到可學習文字。',
-    highlights: text ? '可用於品牌介紹、短影音腳本、人設設定、CTA 與 FAQ。' : '缺少可整理的重點。',
-    audience: currentPersona.audience || '受眾尚未明確。',
-    painPoints: `source_id=${sourceId}; document_title=文字匯入資料; chunk_id=chunk_001; workspace_id=demo-workspace-room`,
-    topics: '文字匯入 / 品牌資料 / 短影音素材',
-    sellingPoints: '可轉成腳本素材、真人句、觀眾痛點、拍攝段落與 CTA。',
-    sourceText: text,
-  };
-}
+export const roomApi = {
+  createRoom: (token: string) => request<RoomContextResponse>('/api/rooms', { method: 'POST', body: JSON.stringify({ title: 'HERMES 小房間' }) }, token),
+  getState: (roomId: string, token: string) => request<RoomContextResponse>(`/api/rooms/${roomId}/state`, {}, token),
+  sendMessage: (roomId: string, token: string, content: string) => request<RoomContextResponse>(`/api/rooms/${roomId}/messages`, { method: 'POST', body: JSON.stringify({ content }) }, token),
+  learnText: (roomId: string, token: string, text: string, title?: string) => request<RoomContextResponse>(`/api/rooms/${roomId}/learn-text`, { method: 'POST', body: JSON.stringify({ text, title }) }, token),
+  generateScript: (roomId: string, token: string, persona: PersonaData, params?: ScriptParams) => request<RoomContextResponse>(`/api/rooms/${roomId}/generate-script`, { method: 'POST', body: JSON.stringify({ persona, params }) }, token),
+  deleteMemory: (roomId: string, token: string, id: string) => request<{ deleted: boolean; id: string }>(`/api/rooms/${roomId}/delete-memory`, { method: 'POST', body: JSON.stringify({ id }) }, token),
+  deleteDocument: (roomId: string, token: string, id: string) => request<{ deleted: boolean; id: string }>(`/api/rooms/${roomId}/delete-document`, { method: 'POST', body: JSON.stringify({ id }) }, token),
+};
 
 export const api = {
   getStatus: async (): Promise<StatusResponse> => {
-    const aiStatus = await getServerStatus();
-    return {
-      coreVersion: 'IE程 Demo Core v0.4',
-      runtime: aiStatus?.aiConnected ? 'real AI via local server' : 'mock fallback',
-      coreMutable: false,
-      auth: aiStatus?.aiConnected ? 'local API key loaded server-side' : 'API key not loaded',
-      workspaceId: 'demo-workspace-room',
-      isolationMode: 'TG room voice DNA + workspace learning',
-      sourceArtifact: 'IE程 short-video operator prompt',
-      aiConnected: aiStatus?.aiConnected ?? false,
-      aiModel: aiStatus?.model,
-    };
+    try {
+      return await request<StatusResponse>('/api/status');
+    } catch {
+      return { aiConnected: false, model: 'offline', mode: 'frontend-fallback', supabaseConfigured: false };
+    }
   },
 
-  getState: async () => {
-    await delay(120);
-    return { workspace: 'Demo Workspace', persona: currentPersona, learnedUrls, memories: workspaceMemories, scripts: scriptsLibrary };
-  },
+  getState: async () => ({
+    workspace: 'Demo Workspace',
+    persona: currentPersona,
+    learnedUrls: learnedTexts,
+    memories: workspaceMemories,
+    scripts: scriptsLibrary,
+  }),
 
   updatePersona: async (data: Partial<PersonaData>) => {
-    await delay(120);
     currentPersona = { ...currentPersona, ...data };
     return currentPersona;
   },
 
   suggestCta: async (data: Partial<PersonaData>) => {
     try {
-      const result = await postJson<{ suggestions: string[] }>('/api/suggest-cta', { persona: data });
-      return result?.suggestions?.length ? result.suggestions : ['想先看你的短影音可以怎麼拍，私訊我「短影音腳本」。'];
+      const result = await request<{ suggestions: string[] }>('/api/suggest-cta', { method: 'POST', body: JSON.stringify({ persona: data }) });
+      return result.suggestions;
     } catch {
       return [
-        '想先看你的短影音可以怎麼拍，私訊我「短影音腳本」，我先幫你抓一版方向。',
-        '如果你也卡在腳本和人設，直接私訊「短影音腳本」。',
+        '想把你的短影音方向整理清楚，可以先私訊「腳本」。',
+        '把現有素材丟進 HERMES 小房間，先跑一版真人互動腳本。',
+        '如果你不想再寫出公關稿，先讓 IE程 幫你拆一版。',
       ];
     }
   },
 
   suggestBoundaries: async (data: Partial<PersonaData>) => {
     try {
-      const result = await postJson<{ suggestions: string[] }>('/api/suggest-boundaries', { persona: data });
-      return result?.suggestions?.length ? result.suggestions : ['不保證流量、成交或業績結果。', '不使用恐嚇式行銷。'];
+      const result = await request<{ suggestions: string[] }>('/api/suggest-boundaries', { method: 'POST', body: JSON.stringify({ persona: data }) });
+      return result.suggestions;
     } catch {
-      return ['不保證流量、成交或業績結果。', '不使用恐嚇式行銷。', '不把公開資訊寫成品牌承諾。'];
+      return ['不保證流量或成交', '不恐嚇式行銷', '不使用未提供的產品功能', '不碰醫療/投資/法律保證'];
     }
   },
 
   learnUrl: async (input: { url?: string; text?: string }): Promise<UrlLearningResult> => {
-    const textInput = { text: input.text || input.url || '' };
-    let learned: UrlLearningResult;
+    const text = input.text || input.url || '';
+    let result: UrlLearningResult;
     try {
-      learned = await postJson<UrlLearningResult>('/api/learn-text', { persona: currentPersona, input: textInput, learnedTexts: learnedUrls });
+      result = await request<UrlLearningResult>('/api/learn-text', { method: 'POST', body: JSON.stringify({ persona: currentPersona, input: { text } }) });
     } catch {
-      learned = localLearningFallback(input);
+      result = {
+        id: crypto.randomUUID(),
+        background: '已將文字放入 Demo 學習層。',
+        highlights: '可用於腳本開場、受眾痛點、CTA 與內容邊界。',
+        audience: currentPersona.audience,
+        painPoints: `source_id=${Date.now()}; document_title=文字匯入資料; chunk_id=chunk_001; workspace_id=demo`,
+        topics: '短影音素材 / 人設 / CTA',
+        sellingPoints: '把原始文字整理成可拍攝文稿素材。',
+        sourceText: text,
+      };
     }
-    const learnedWithId = withLearningId(learned);
-    learnedUrls = [learnedWithId, ...learnedUrls];
-    return learnedWithId;
+    learnedTexts = [result, ...learnedTexts];
+    return result;
   },
 
   deleteLearning: async (id: string) => {
-    await delay(120);
-    const target = learnedUrls.find((item) => item.id === id);
-    if (target?.painPoints) deletedLearningCitations.add(target.painPoints);
-    learnedUrls = learnedUrls.filter((item) => item.id !== id);
+    learnedTexts = learnedTexts.filter((item) => item.id !== id);
     scriptsLibrary = scriptsLibrary.map((script) => ({
       ...script,
-      citations: markDeletedCitations(script.citations),
+      citations: (script.citations || []).map((citation) => citation.includes(id) ? `${citation}（來源已刪除）` : citation),
     }));
     return { deleted: true, id, scripts: scriptsLibrary };
   },
 
   generateScript: async (params: ScriptParams) => {
-    let result: HermesScriptResponse;
-    try {
-      result = await postJson<HermesScriptResponse>('/api/scripts', {
+    const result = await request<any>('/api/scripts', {
+      method: 'POST',
+      body: JSON.stringify({
         persona: currentPersona,
         cta: {
           goal: currentPersona.ctaGoal,
@@ -361,87 +407,41 @@ export const api = {
           finalText: currentPersona.ctaMethod,
         },
         forbiddenWords: currentPersona.forbiddenWords,
-        learnedUrls,
+        learnedUrls: learnedTexts,
         memories: workspaceMemories,
         params,
-      });
-    } catch (error) {
-      result = fallbackScriptError(error instanceof Error ? error.message : String(error));
-    }
-
-    const newScript: ScriptData = {
-      id: Math.random().toString(36).slice(2, 11),
-      platform: params.platform,
-      purpose: params.purpose,
-      scriptStyle: params.scriptStyle,
-      durationSeconds: params.durationSeconds,
-      tones: params.tones,
-      roles: params.roles,
-      status: 'draft',
-      createdAt: new Date().toISOString(),
-      blocks: result.blocks?.length ? result.blocks : fallbackScriptError('AI 沒有回傳 blocks').blocks || [],
-      hermesJudgement: result.hermesJudgement,
-      usableMaterials: result.usableMaterials,
-      missingInfo: result.missingInfo,
-      safetyCheck: result.safetyCheck,
-      citations: markDeletedCitations(result.citations),
-      publicResearch: result.publicResearch,
-      voiceDna: result.voiceDna,
-      rehearsalPreview: result.rehearsalPreview,
-      realLines: result.realLines,
-      storyBeats: result.storyBeats,
-      publishPack: result.publishPack,
-      qualityCheck: result.qualityCheck,
-    };
-    scriptsLibrary = [newScript, ...scriptsLibrary];
-    return newScript;
+      }),
+    }).catch(() => null);
+    const script = toScriptData(result, params);
+    scriptsLibrary = [script, ...scriptsLibrary];
+    return script;
   },
 
   rewriteScript: async (id: string, action: string) => {
-    const script = scriptsLibrary.find((item) => item.id === id);
-    if (!script) throw new Error('Script not found');
-
-    let result: HermesScriptResponse;
-    try {
-      result = await postJson<HermesScriptResponse>('/api/rewrite-script', { script, action, persona: currentPersona });
-    } catch (error) {
-      result = fallbackScriptError(error instanceof Error ? error.message : String(error));
-    }
-
-    const rewrittenScript: ScriptData = {
-      ...script,
-      id: Math.random().toString(36).slice(2, 11),
-      createdAt: new Date().toISOString(),
-      blocks: result.blocks?.length ? result.blocks : script.blocks,
-      hermesJudgement: result.hermesJudgement || script.hermesJudgement,
-      voiceDna: result.voiceDna || script.voiceDna,
-      rehearsalPreview: result.rehearsalPreview || script.rehearsalPreview,
-      realLines: result.realLines || script.realLines,
-      storyBeats: result.storyBeats || script.storyBeats,
-      publishPack: result.publishPack || script.publishPack,
-      qualityCheck: result.qualityCheck || script.qualityCheck,
-    };
-    scriptsLibrary = [rewrittenScript, ...scriptsLibrary];
-    return rewrittenScript;
+    const base = scriptsLibrary.find((script) => script.id === id);
+    if (!base) throw new Error('找不到腳本');
+    const result = await request<any>('/api/rewrite-script', { method: 'POST', body: JSON.stringify({ script: base, action, persona: currentPersona }) }).catch(() => null);
+    const script = { ...base, ...toScriptData(result || base), id: crypto.randomUUID(), createdAt: new Date().toISOString() };
+    scriptsLibrary = [script, ...scriptsLibrary];
+    return script;
   },
 
   addMemory: async (content: string) => {
-    await delay(120);
-    const memory: MemoryData = { id: Math.random().toString(36).slice(2, 11), content, createdAt: new Date().toISOString() };
+    const memory = { id: crypto.randomUUID(), content, createdAt: new Date().toISOString() };
     workspaceMemories = [memory, ...workspaceMemories];
     return memory;
   },
 
   deleteMemory: async (id: string) => {
-    await delay(120);
     workspaceMemories = workspaceMemories.filter((memory) => memory.id !== id);
     return { deleted: true, id };
   },
 
   updateScriptStatus: async (id: string, status: ScriptData['status']) => {
-    await delay(120);
     const script = scriptsLibrary.find((item) => item.id === id);
     if (script) script.status = status;
     return script;
   },
 };
+
+export type AuthUser = User;
