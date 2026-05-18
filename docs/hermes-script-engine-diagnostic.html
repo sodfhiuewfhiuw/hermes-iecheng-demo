@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HERMES 網站版腳本引擎診斷與原始 Agent 校準問題</title>
+  <style>
+    :root {
+      --navy: #08285c;
+      --ink: #111827;
+      --muted: #667085;
+      --peach: #ffb08a;
+      --line: #d9dee8;
+      --bg: #f7f8fb;
+      --danger: #b42318;
+      --ok: #027a48;
+      --warn: #b54708;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.7;
+    }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 40px 24px 64px;
+    }
+    header {
+      border-bottom: 4px solid var(--navy);
+      padding-bottom: 24px;
+      margin-bottom: 28px;
+    }
+    h1 {
+      margin: 0 0 12px;
+      color: var(--navy);
+      font-size: 34px;
+      line-height: 1.25;
+    }
+    h2 {
+      margin: 36px 0 12px;
+      color: var(--navy);
+      font-size: 23px;
+      border-left: 8px solid var(--peach);
+      padding-left: 12px;
+    }
+    h3 {
+      margin: 22px 0 8px;
+      color: var(--ink);
+      font-size: 18px;
+    }
+    p { margin: 8px 0; }
+    .subtitle {
+      color: var(--muted);
+      font-size: 16px;
+    }
+    .panel {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin: 14px 0;
+    }
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .status {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .status strong {
+      display: block;
+      color: var(--navy);
+      margin-bottom: 4px;
+    }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 10px;
+      margin: 2px 4px 2px 0;
+      font-size: 13px;
+      font-weight: 700;
+      background: #edf2ff;
+      color: var(--navy);
+    }
+    .ok { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    .danger { color: var(--danger); font-weight: 700; }
+    code, pre {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+    }
+    pre {
+      white-space: pre-wrap;
+      background: #101828;
+      color: #f8fafc;
+      border-radius: 8px;
+      padding: 16px;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    th { background: #edf2ff; color: var(--navy); }
+    ul { padding-left: 22px; }
+    @media (max-width: 760px) {
+      .status-grid { grid-template-columns: 1fr; }
+      h1 { font-size: 26px; }
+      main { padding: 28px 16px 48px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>HERMES 網站版腳本引擎診斷與原始 Agent 校準問題</h1>
+      <p class="subtitle">目的：確認網站版 Demo 目前不是靠固定 fallback 生腳本，而是由 LLM 產出；並請原始 TG Agent 協助校準「劇作能力、行業洞察、真人互動」三個核心。</p>
+      <div>
+        <span class="tag">IE程</span>
+        <span class="tag">短影音腳本生成器</span>
+        <span class="tag">真 LLM 或明確失敗</span>
+        <span class="tag">行業洞察前置推理</span>
+      </div>
+    </header>
+
+    <section class="status-grid">
+      <div class="status">
+        <strong>目前狀態</strong>
+        <span class="ok">已接真 LLM</span>
+        <p>CTA 建議、文字學習、腳本生成皆走 server API。</p>
+      </div>
+      <div class="status">
+        <strong>已修正風險</strong>
+        <span class="ok">fallback 不再補正式腳本 blocks</span>
+        <p>LLM 若沒有回有效腳本段落，server 直接報錯。</p>
+      </div>
+      <div class="status">
+        <strong>待校準核心</strong>
+        <span class="warn">劇作質感仍需原始 TG Agent 指導</span>
+        <p>需要更精準的行業場景、角色衝突、真人句規則。</p>
+      </div>
+    </section>
+
+    <h2>一、目前網站版生成流程</h2>
+    <div class="panel">
+      <p>目前腳本生成不是單純把表單丟給模型，而是改成兩段 LLM：</p>
+      <ol>
+        <li><strong>industry_research</strong>：依產業、人設、平台、目的推理受眾、痛點、信任障礙、常見情境、角色關係。</li>
+        <li><strong>generate_script</strong>：讀取 industryInsight、persona、CTA、禁語、學習資料與記憶，再產出正式腳本 JSON。</li>
+      </ol>
+      <pre>persona + params + learnedTexts + memories
+        ↓
+LLM stage 1: industry_research
+        ↓
+industryInsight
+        ↓
+LLM stage 2: generate_script
+        ↓
+factBoundary / audiencePsychology / sceneLogic / blocks / qualityCheck</pre>
+    </div>
+
+    <h2>二、fallback 現況與剛修掉的問題</h2>
+    <div class="panel">
+      <h3>原本的危險點</h3>
+      <p>server 裡有一個 <code>buildFallbackScript()</code>，原本用途是提供 JSON shape 與本機 smoke test 的預設內容。但之前存在一個危險狀況：</p>
+      <pre>如果 LLM 有回 JSON，但 blocks 是空的
+normalizeScriptOutput() 會用 fallback.blocks 補上
+前端看起來像真的產出了一份腳本</pre>
+      <p class="danger">這會讓 fallback 偽裝成正式腳本，不能接受。</p>
+
+      <h3>目前已修正</h3>
+      <p>現在已改成：</p>
+      <pre>如果 LLM 沒有回有效 blocks
+server throw apiError('generate_script', 'invalid_script_output_missing_blocks')
+前端顯示「API 錯誤，請聯繫官方」
+不新增假草稿</pre>
+      <p class="ok">也就是：fallback 不能再補出正式腳本 blocks。</p>
+    </div>
+
+    <h2>三、目前仍可能不夠像 TG HERMES 的地方</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>問題</th>
+          <th>目前狀況</th>
+          <th>需要原始 Agent 協助</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>行業切換後劇情不夠不同</td>
+          <td>已新增 industry_research，餐飲會跑出外帶、排隊、飯糰；裝修會跑出報價單、另計、追加預算。</td>
+          <td>提供 TG 端如何依產業選擇角色、場景、衝突的規則。</td>
+        </tr>
+        <tr>
+          <td>真人句還不夠狠</td>
+          <td>現在 prompt 要求短句、反應、追問，但仍可能偏保守。</td>
+          <td>提供 TG 端常用口語節奏、吐槽強度、藏鏡人拆話的規則。</td>
+        </tr>
+        <tr>
+          <td>故事可能仍像「解釋服務」</td>
+          <td>已要求先模擬現場，但模型有時仍會回到說明型文案。</td>
+          <td>提供「現場模擬 → 真人句 → 故事骨架 → 正式 blocks」的更硬性判斷標準。</td>
+        </tr>
+        <tr>
+          <td>缺資料時的自由度</td>
+          <td>目前規則是：硬事實不能編，情境可以演，行業常識可以安全推理。</td>
+          <td>確認 TG 端對「安全行業常識」與「不可亂編事實」的邊界。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>四、想請原始 TG Agent 回答的問題</h2>
+    <div class="panel">
+      <ol>
+        <li>當使用者只填產業、人設、受眾，但幾乎沒有學習資料時，HERMES 應該怎麼推導第一個可拍場景？</li>
+        <li>不同行業的「角色關係」應該怎麼選？例如餐飲、美業、裝修、教育、B2B、政治服務。</li>
+        <li>藏鏡人應該在什麼時候吐槽、追問、打斷？有沒有固定判斷規則？</li>
+        <li>「真人句」的檢查標準能不能更具體？例如幾個字以內、是否要有停頓、是否要有反應詞。</li>
+        <li>如何避免腳本變成公司介紹、產品說明、服務簡報？</li>
+        <li>如果資料不足，哪些地方可以用行業常識補，哪些地方一定要問使用者？</li>
+        <li>可否提供一份 TG 端腳本引擎的 JSON schema 或 pseudo-code？</li>
+      </ol>
+    </div>
+
+    <h2>五、建議原始 Agent 回傳格式</h2>
+    <pre>{
+  "scriptEngineRules": {
+    "industryReasoning": [],
+    "roleSelection": [],
+    "sceneSimulation": [],
+    "hiddenDirectorQuestions": [],
+    "realLineRules": [],
+    "storyBeatRules": [],
+    "qualityCheckRules": []
+  },
+  "industryExamples": [
+    {
+      "industry": "餐飲",
+      "audiencePain": [],
+      "sceneSeeds": [],
+      "rolePatterns": [],
+      "badTemplatesToAvoid": []
+    }
+  ],
+  "promptPatch": {
+    "systemPrompt": "",
+    "scriptEnginePrompt": "",
+    "jsonSchema": {}
+  }
+}</pre>
+
+    <h2>六、目前我方需要確認的結論</h2>
+    <div class="panel">
+      <p class="ok">現在正式路徑應該是 LLM 自動生成，不是 fallback 腳本。</p>
+      <p>但 <code>buildFallbackScript()</code> 這個函式仍存在於 server，未來最好改名成 <code>buildScriptSchemaDefaults()</code>，只保留欄位形狀與安全預設，不放完整腳本台詞，避免任何人誤用。</p>
+      <p class="warn">下一步建議：請原始 TG Agent 回傳劇作規則後，把 fallback 內容完全改成 schema-only，讓任何正式腳本都必須來自 LLM blocks。</p>
+    </div>
+  </main>
+</body>
+</html>

@@ -449,13 +449,12 @@ function normalizeScriptOutput(raw, fallback) {
     .filter((block) => block && typeof block === 'object')
     .map((block, index) => ({
       time: String(block.time || block.timestamp || `${index * 5}-${(index + 1) * 5} 秒`),
-      speaker: String(block.speaker || block.role || fallback.blocks?.[index]?.speaker || '藏鏡人'),
-      visual: String(block.visual || block.scene || block.shot || fallback.blocks?.[index]?.visual || '可拍攝畫面'),
-      audio: String(block.audio || block.line || block.dialogue || block.content || fallback.blocks?.[index]?.audio || ''),
+      speaker: String(block.speaker || block.role || '藏鏡人'),
+      visual: String(block.visual || block.scene || block.shot || '可拍攝畫面'),
+      audio: String(block.audio || block.line || block.dialogue || block.content || ''),
     }))
     .filter((block) => block.audio);
 
-  if (!result.blocks.length) result.blocks = fallback.blocks;
   if (!Array.isArray(result.rehearsalPreview) && Array.isArray(simulationSection?.content)) result.rehearsalPreview = simulationSection.content;
   if (!Array.isArray(result.realLines) && Array.isArray(realLineSection?.content)) result.realLines = realLineSection.content;
   if (!result.storyBeats && storySection?.content && typeof storySection.content === 'object') result.storyBeats = storySection.content;
@@ -554,6 +553,9 @@ async function generateScript(input) {
   ], fallback, 0.9, { allowFallback: false, stage: 'generate_script' });
   const brandName = input?.persona?.brandName;
   const normalized = normalizeScriptOutput({ ...raw, industryInsight: raw.industryInsight || industryInsight }, fallback);
+  if (!Array.isArray(normalized.blocks) || normalized.blocks.length === 0) {
+    throw apiError('generate_script', 'invalid_script_output_missing_blocks', 502);
+  }
   return sanitizeScriptCta(stabilizeBrandName(normalized, brandName), brandName);
 }
 
