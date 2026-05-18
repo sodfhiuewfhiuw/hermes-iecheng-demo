@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HERMES 腳本生成邏輯說明</title>
+  <style>
+    :root {
+      --navy: #08245c;
+      --ink: #111827;
+      --muted: #64748b;
+      --line: #d7deea;
+      --soft: #f7f9fc;
+      --peach: #ffad86;
+      --peach-soft: #fff0e9;
+      --ok: #0f766e;
+      --warn: #b45309;
+      --risk: #b91c1c;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+      color: var(--ink);
+      background: #ffffff;
+      line-height: 1.7;
+    }
+
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 40px 24px 72px;
+    }
+
+    header {
+      border-bottom: 2px solid var(--navy);
+      padding-bottom: 24px;
+      margin-bottom: 28px;
+    }
+
+    .eyebrow {
+      color: var(--navy);
+      font-weight: 800;
+      letter-spacing: .04em;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      font-size: clamp(30px, 5vw, 52px);
+      line-height: 1.1;
+      margin: 0 0 12px;
+      color: var(--navy);
+    }
+
+    h2 {
+      color: var(--navy);
+      font-size: 26px;
+      margin: 36px 0 12px;
+      padding-top: 4px;
+    }
+
+    h3 {
+      font-size: 19px;
+      margin: 24px 0 8px;
+    }
+
+    p { margin: 8px 0 14px; }
+
+    .summary {
+      font-size: 18px;
+      color: #253044;
+      max-width: 880px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      background: var(--soft);
+    }
+
+    .card.peach {
+      background: var(--peach-soft);
+      border-color: #ffd2bf;
+    }
+
+    .flow {
+      counter-reset: step;
+      display: grid;
+      gap: 12px;
+      margin: 18px 0;
+    }
+
+    .step {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px 16px 16px 58px;
+      background: #fff;
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--navy);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+    }
+
+    code, pre {
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 14px;
+    }
+
+    pre {
+      overflow: auto;
+      background: #0f172a;
+      color: #e5edf7;
+      border-radius: 8px;
+      padding: 16px;
+      line-height: 1.55;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: var(--navy);
+      font-size: 13px;
+      font-weight: 700;
+      margin: 2px 4px 2px 0;
+    }
+
+    .warn { color: var(--warn); font-weight: 700; }
+    .risk { color: var(--risk); font-weight: 700; }
+    .ok { color: var(--ok); font-weight: 700; }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 12px 0 20px;
+      font-size: 15px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+    }
+
+    th {
+      text-align: left;
+      background: var(--navy);
+      color: #fff;
+    }
+
+    ul { padding-left: 22px; }
+
+    @media (max-width: 760px) {
+      main { padding: 28px 16px 56px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">給原始 HERMES Agent 的技術說明</div>
+      <h1>HERMES / IE程 腳本生成邏輯與待解問題</h1>
+      <p class="summary">
+        這份文件說明目前網站版 Demo 的 LLM 腳本生成方式、資料流、prompt 設計、已知問題，以及需要原始 TG 端 HERMES Agent 協助校準的地方。
+        目標不是請原始 Agent 改 UI，而是請它補齊「HERMES 真正怎麼像劇作家一樣思考腳本」的內部規則。
+      </p>
+    </header>
+
+    <section>
+      <h2>一、目前產品定位</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>目前網站版</h3>
+          <p>React/Vite 前端 + Node local AI server，呼叫 OpenAI 模型 <code>gpt-5.4-mini</code> 產生短影音腳本。</p>
+          <p>目前不是完整原生 HERMES runtime，也不是 TG 端的小房間本體。</p>
+        </div>
+        <div class="card peach">
+          <h3>希望靠近的目標</h3>
+          <p>不是資料摘要工具，而是短影音劇作家、現場導演、腳本操盤手。</p>
+          <p>即使使用者只提供少量文字，也要產出一版可拍、可演、有角色互動的標準腳本。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>二、目前 LLM 腳本生成流程</h2>
+      <p>目前 server 的主流程在 <code>server.mjs</code>，核心函式是 <code>generateScript(input)</code>。</p>
+      <div class="flow">
+        <div class="step">
+          <h3>收集輸入</h3>
+          <p>前端送入 persona、CTA、禁語、文字學習資料、手動記憶、腳本參數。</p>
+          <p><span class="tag">persona</span><span class="tag">learnedUrls</span><span class="tag">memories</span><span class="tag">params</span></p>
+        </div>
+        <div class="step">
+          <h3>建立 fallback script</h3>
+          <p>server 先建立一份保底腳本，避免 API 失敗或模型回 JSON 格式錯誤時前端沒有內容。</p>
+        </div>
+        <div class="step">
+          <h3>注入 Prompt</h3>
+          <p>server 讀取兩份 prompt：</p>
+          <ul>
+            <li><code>prompts/hermes.system.md</code>：定義 HERMES / IE程 是短影音劇作家，不是資料整理員。</li>
+            <li><code>prompts/tg_script_engine.md</code>：定義腳本生成流程：判斷、現場模擬、真人句、故事骨架、腳本草稿、品質檢查。</li>
+          </ul>
+        </div>
+        <div class="step">
+          <h3>呼叫 LLM 產生 JSON</h3>
+          <p>要求模型只回 JSON，包含 <code>hermesJudgement</code>、<code>rehearsalPreview</code>、<code>realLines</code>、<code>storyBeats</code>、<code>blocks</code> 等欄位。</p>
+        </div>
+        <div class="step">
+          <h3>正規化與清洗</h3>
+          <p>因為模型有時會把整份報告塞進 <code>blocks</code>，server 會用 <code>normalizeScriptOutput()</code> 抽出真正的腳本段落。</p>
+          <p>另外會清洗品牌名與 CTA，避免輸出內部測試語，例如「小房間」、「丟素材給我」。</p>
+        </div>
+        <div class="step">
+          <h3>前端顯示</h3>
+          <p>前端 <code>api.ts</code> 會再做一次 UI 安全正規化，避免模型回物件或陣列時 React render 白屏。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>三、目前要求模型模擬的劇作流程</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>階段</th>
+            <th>目前定義</th>
+            <th>希望原始 Agent 補充</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>HERMES 判斷</td>
+            <td>先判斷觀眾心裡正在卡哪一句、品牌主哪裡講得像廣告、適合哪種角色形式。</td>
+            <td>原生 HERMES 在 TG 端是否有固定判斷順序？例如先看受眾、痛點、信任門檻、轉換行為？</td>
+          </tr>
+          <tr>
+            <td>現場模擬</td>
+            <td>優先用二人或三人互動，不預設一人口播。</td>
+            <td>原生 HERMES 如何決定角色？品牌主、觀眾、藏鏡人、旁白、客戶之間有沒有固定分工？</td>
+          </tr>
+          <tr>
+            <td>真人句</td>
+            <td>從模擬中抽出像真人會講的句子，避免簡報語與公關稿。</td>
+            <td>TG 端常用的口語節奏、停頓、吐槽、反問、拆解句型有哪些？</td>
+          </tr>
+          <tr>
+            <td>故事骨架</td>
+            <td>建立 hook / setup / conflict / turningPoint / ending。</td>
+            <td>原生 HERMES 的短影音劇情結構是否更細？例如反差、誤解、打臉、補刀、轉念、收束？</td>
+          </tr>
+          <tr>
+            <td>腳本草稿</td>
+            <td>每段包含 time、speaker、visual、audio。</td>
+            <td>原生輸出是否還會包含鏡頭、表演指令、字幕、節奏、剪輯點、情緒層次？</td>
+          </tr>
+          <tr>
+            <td>品質檢查</td>
+            <td>檢查鉤子、互動、CTA、可拍性、禁語與誇大承諾。</td>
+            <td>原生 HERMES 如何判斷「像不像人話」與「可不可拍」？有沒有打分規則？</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>四、目前真正遇到的問題</h2>
+      <div class="card">
+        <h3>1. 資料邊界與劇作自由的拉扯</h3>
+        <p>
+          文字學習資料如果被看得太硬，模型會變成資料稽核員，一直說「資料不足」。
+          但如果完全放開，模型可能捏造產品功能、價格、案例或成效。
+        </p>
+        <p class="warn">目前策略：文字資料只限制事實，不限制情境創作。</p>
+      </div>
+
+      <div class="card">
+        <h3>2. 模型容易寫成「文案」，不是「劇本」</h3>
+        <p>
+          如果 prompt 沒有強迫它先跑現場模擬，模型會直接寫口播稿或服務介紹。
+          但使用者要的是角色互動、真實情境、可演出的劇本。
+        </p>
+        <p class="warn">需要原生 HERMES 提供更準確的「劇本生成內部流程」。</p>
+      </div>
+
+      <div class="card">
+        <h3>3. CTA 很容易污染整支腳本</h3>
+        <p>
+          如果人設設定裡有怪 CTA，模型會照抄到最後一句。
+          例如之前殘留「把現有素材丟進 HERMES 小房間」，導致對外腳本出現內部測試語。
+        </p>
+        <p class="ok">目前已加 CTA 清洗，但還需要原生 HERMES 的 CTA 收尾規則。</p>
+      </div>
+
+      <div class="card">
+        <h3>4. 缺少 TG 端口語 DNA</h3>
+        <p>
+          目前模型能產生角色互動，但語氣仍像「被提示過的 GPT」。
+          真正缺的是 TG 端 HERMES 的固定詞彙、拆稿口吻、吐槽方式、轉折句型與判斷習慣。
+        </p>
+        <p class="risk">這是目前最需要原始 Agent 回覆的部分。</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>五、目前 JSON 輸出格式</h2>
+      <pre><code>{
+  "hermesJudgement": {
+    "coreProblem": "這支片真正要處理的問題",
+    "realAudienceQuestion": "觀眾心裡 OS",
+    "brandTalkRisk": "品牌主容易講歪的地方",
+    "bestInteractionForm": "建議互動形式"
+  },
+  "rehearsalPreview": [
+    {
+      "speaker": "品牌主",
+      "line": "真人模擬句",
+      "innerOS": "角色心裡想法",
+      "purpose": "這句在劇情裡的功能"
+    }
+  ],
+  "realLines": [
+    "抽出的真人句"
+  ],
+  "storyBeats": {
+    "hook": "開場鉤子",
+    "setup": "情境建立",
+    "conflict": "角色衝突",
+    "turningPoint": "轉折",
+    "ending": "收尾與 CTA"
+  },
+  "blocks": [
+    {
+      "time": "0-5 秒",
+      "speaker": "藏鏡人",
+      "visual": "可拍攝畫面",
+      "audio": "可直接演出的台詞"
+    }
+  ],
+  "qualityCheck": {
+    "hook": "通過 / 需補強 / 風險",
+    "interaction": "通過 / 需補強 / 風險",
+    "cta": "通過 / 需補強 / 風險",
+    "shootability": "通過 / 需補強 / 風險",
+    "risk": "是否踩禁語或誇大承諾"
+  }
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>六、請原始 Agent 回覆的問題</h2>
+      <ol>
+        <li>原生 TG HERMES 在產腳本前，真正的思考順序是什麼？</li>
+        <li>它如何把少量資料轉成可演出的情境，而不是只做資料摘要？</li>
+        <li>它有哪些固定的「觀眾心裡 OS」判斷方法？</li>
+        <li>藏鏡人、品牌主、觀眾、客戶、旁白這些角色的分工規則是什麼？</li>
+        <li>它如何判斷應該用一人、二人、三人、街訪、店員客人互動、主持人討論？</li>
+        <li>它有哪些常用句型、禁用句型、轉折句、吐槽句、補刀句？</li>
+        <li>CTA 要怎麼收才像 HERMES，不像廣告，也不像內部系統提示？</li>
+        <li>原生輸出的腳本格式是否應加入鏡頭、字幕、表演指令、剪輯點、情緒層次？</li>
+        <li>它如何檢查「這句像不像人話」？是否有評分或重寫規則？</li>
+        <li>如果文字資料不足，原生 HERMES 會如何補足劇情但不捏造產品事實？</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>七、希望原始 Agent 提供的最好格式</h2>
+      <p>請原始 Agent 盡量用以下格式回覆，方便直接轉成 prompt 與 server pipeline：</p>
+      <pre><code>{
+  "thinkingStages": ["階段 1", "階段 2", "階段 3"],
+  "roleTemplates": {
+    "品牌主": "功能說明",
+    "藏鏡人": "功能說明",
+    "觀眾": "功能說明"
+  },
+  "scriptFormats": [
+    {
+      "name": "雙人對話",
+      "whenToUse": "使用時機",
+      "structure": ["hook", "conflict", "turn", "cta"]
+    }
+  ],
+  "tgVoiceDna": {
+    "commonPhrases": ["常用句"],
+    "transitionLines": ["轉折句"],
+    "forbiddenPhrases": ["禁用句"]
+  },
+  "ctaRules": ["CTA 規則"],
+  "rewriteRules": ["如何把 GPT 味改成人話"]
+}</code></pre>
+    </section>
+  </main>
+</body>
+</html>
