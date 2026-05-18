@@ -282,9 +282,69 @@ function buildFallbackScript(input) {
   };
 }
 
+function findSection(sections, keyword) {
+  if (!Array.isArray(sections)) return undefined;
+  return sections.find((section) => String(section.blockName || section.title || '').includes(keyword));
+}
+
+function normalizeScriptOutput(raw, fallback) {
+  const result = raw && typeof raw === 'object' ? { ...raw } : {};
+  const sections = Array.isArray(result.blocks) ? result.blocks : [];
+  const draftSection = findSection(sections, '腳本草稿');
+  const simulationSection = findSection(sections, '現場模擬');
+  const realLineSection = findSection(sections, '真人句');
+  const storySection = findSection(sections, '故事骨架');
+  const checkSection = findSection(sections, '人話檢查');
+
+  const normalizedBlocks = Array.isArray(draftSection?.content)
+    ? draftSection.content
+    : Array.isArray(result.blocks)
+      ? result.blocks
+      : [];
+
+  result.blocks = normalizedBlocks
+    .filter((block) => block && typeof block === 'object')
+    .map((block, index) => ({
+      time: String(block.time || block.timestamp || `${index * 5}-${(index + 1) * 5} 秒`),
+      speaker: String(block.speaker || block.role || fallback.blocks?.[index]?.speaker || '藏鏡人'),
+      visual: String(block.visual || block.scene || block.shot || fallback.blocks?.[index]?.visual || '可拍攝畫面'),
+      audio: String(block.audio || block.line || block.dialogue || block.content || fallback.blocks?.[index]?.audio || ''),
+    }))
+    .filter((block) => block.audio);
+
+  if (!result.blocks.length) result.blocks = fallback.blocks;
+  if (!Array.isArray(result.rehearsalPreview) && Array.isArray(simulationSection?.content)) result.rehearsalPreview = simulationSection.content;
+  if (!Array.isArray(result.realLines) && Array.isArray(realLineSection?.content)) result.realLines = realLineSection.content;
+  if (!result.storyBeats && storySection?.content && typeof storySection.content === 'object') result.storyBeats = storySection.content;
+  if (!result.humanSpeechCheck && checkSection?.content) {
+    result.humanSpeechCheck = {
+      overall: '需補強',
+      aiPublicRelationsTone: String(checkSection.content),
+      exaggeratedClaims: '未檢出',
+      forbiddenWords: '未檢出',
+      humanNaturalness: String(checkSection.content),
+      suggestedFixes: [],
+    };
+  }
+
+  return {
+    ...fallback,
+    ...result,
+    blocks: result.blocks,
+    rehearsalPreview: result.rehearsalPreview || fallback.rehearsalPreview,
+    realLines: result.realLines || fallback.realLines,
+    storyBeats: result.storyBeats || fallback.storyBeats,
+    publishPack: result.publishPack || fallback.publishPack,
+    qualityCheck: result.qualityCheck || fallback.qualityCheck,
+    humanSpeechCheck: result.humanSpeechCheck || fallback.humanSpeechCheck,
+    voiceDna: result.voiceDna || fallback.voiceDna,
+    citations: result.citations || fallback.citations,
+  };
+}
+
 async function generateScript(input) {
   const fallback = buildFallbackScript(input);
-  return askJson([
+  const raw = await askJson([
     {
       role: 'system',
       content: `${HERMES_SYSTEM}\n\n${TG_SCRIPT_ENGINE}\n\n你必須回傳 JSON，不要 Markdown。audio 欄位必須是可直接拍攝或配音的台詞。`,
@@ -294,6 +354,7 @@ async function generateScript(input) {
       content: JSON.stringify({ task: '依照 TG 腳本製作流程產出短影音腳本', requiredKeys: Object.keys(fallback), input }),
     },
   ], fallback, 0.9);
+  return normalizeScriptOutput(raw, fallback);
 }
 
 async function replyToMessage(context, content) {
