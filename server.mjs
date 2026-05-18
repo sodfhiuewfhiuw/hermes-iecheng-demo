@@ -342,19 +342,37 @@ function normalizeScriptOutput(raw, fallback) {
   };
 }
 
+function stabilizeBrandName(value, brandName) {
+  if (!brandName) return value;
+  if (typeof value === 'string') {
+    return value
+      .replace(/\bIE\?/g, brandName)
+      .replace(/\bIE蝔\?/g, brandName);
+  }
+  if (Array.isArray(value)) return value.map((item) => stabilizeBrandName(item, brandName));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, stabilizeBrandName(item, brandName)]));
+  }
+  return value;
+}
+
 async function generateScript(input) {
   const fallback = buildFallbackScript(input);
   const raw = await askJson([
     {
       role: 'system',
-      content: `${HERMES_SYSTEM}\n\n${TG_SCRIPT_ENGINE}\n\n你必須回傳 JSON，不要 Markdown。audio 欄位必須是可直接拍攝或配音的台詞。`,
+      content: `${HERMES_SYSTEM}\n\n${TG_SCRIPT_ENGINE}\n\n你必須回傳 JSON，不要 Markdown。audio 欄位必須是可直接拍攝或配音的台詞。不要把文字資料不足寫進台詞；文字資料只當事實邊界，不是劇作上限。`,
     },
     {
       role: 'user',
-      content: JSON.stringify({ task: '依照 TG 腳本製作流程產出短影音腳本', requiredKeys: Object.keys(fallback), input }),
+      content: JSON.stringify({
+        task: '依照 TG 劇作家模式產出短影音腳本。即使資料少，也要用標準短影音情境、角色衝突、真人句、藏鏡人拆解產出可拍攝版本；不可捏造產品事實。',
+        requiredKeys: Object.keys(fallback),
+        input,
+      }),
     },
   ], fallback, 0.9);
-  return normalizeScriptOutput(raw, fallback);
+  return stabilizeBrandName(normalizeScriptOutput(raw, fallback), input?.persona?.brandName);
 }
 
 async function replyToMessage(context, content) {
