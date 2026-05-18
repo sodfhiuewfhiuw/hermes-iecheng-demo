@@ -43,6 +43,7 @@ export interface ScriptParams {
   durationSeconds: number;
   tones: string[];
   roles: string[];
+  usePublicResearch?: boolean;
 }
 
 export interface ScriptBlock {
@@ -76,6 +77,14 @@ export interface ScriptData {
   missingInfo?: string;
   safetyCheck?: string;
   citations?: string[];
+  publicResearch?: {
+    industrySnapshot?: string;
+    audienceSignals?: string[];
+    popularAngles?: string[];
+    platformNotes?: string[];
+    riskNotes?: string[];
+    sources?: string[];
+  } | null;
   qualityCheck?: QualityCheck;
 }
 
@@ -91,6 +100,7 @@ interface HermesScriptResponse {
   missingInfo?: string;
   safetyCheck?: string;
   citations?: string[];
+  publicResearch?: ScriptData['publicResearch'];
   qualityCheck?: QualityCheck;
   blocks?: ScriptBlock[];
 }
@@ -330,6 +340,7 @@ export const api = {
       missingInfo: result.missingInfo,
       safetyCheck: result.safetyCheck,
       citations: markDeletedCitations(result.citations),
+      publicResearch: result.publicResearch,
       qualityCheck: result.qualityCheck,
     };
     scriptsLibrary = [newScript, ...scriptsLibrary];

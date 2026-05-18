@@ -1,53 +1,44 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { ScriptParams } from '../api';
-import { BrainCircuit, CheckCircle2, Clock, FileText, MessageSquare, RefreshCw, ShieldCheck, Target, Users, Volume2, Wand2 } from 'lucide-react';
+import { BrainCircuit, CheckCircle2, Clock, FileText, Globe2, MessageSquare, RefreshCw, ShieldCheck, Target, Users, Volume2, Wand2 } from 'lucide-react';
 
 const PLATFORM_OPTIONS = ['Reels', 'TikTok/抖音', 'YouTube Shorts', 'Facebook Reels', '多平台'];
 const PURPOSE_OPTIONS = ['曝光', '建立信任', '教育教學', '破除誤解', '引導私訊', '成交轉換', '活動宣傳', '品牌記憶點'];
-const SCRIPT_STYLE_OPTIONS = [
-  '一人口播',
-  '雙人對話',
-  '三人討論',
-  '客戶情境劇',
-  '街訪問答',
-  '店員客人互動',
-  '主持人加來賓',
-  '前後對比短劇',
-];
+const SCRIPT_STYLE_OPTIONS = ['單人口播', '雙人對話', '三人討論', '店員客人互動', '街訪問答', '情境短劇', '一人分飾兩角', '老闆藏鏡人拆解'];
 const TONE_OPTIONS = ['自然口語', '專業可信', '生活感', '幽默吐槽', '溫柔陪伴', '犀利分析', '台灣在地感', '更強 CTA'];
-const REWRITE_ACTIONS = ['更像真人對話', '加強衝突', '更台灣口語', '更有鉤子', '更像短劇', '更強 CTA'];
+const REWRITE_ACTIONS = ['增加互動衝突', '更口語一點', '更像短影音', '加強開場鉤子', '更犀利', '加強 CTA'];
 
 function defaultRolesForStyle(style: string) {
   switch (style) {
-    case '一人口播':
-      return ['主講人'];
+    case '單人口播':
+      return ['旁白'];
     case '三人討論':
       return ['主持人', '客戶', '藏鏡人'];
     case '店員客人互動':
       return ['店員', '客人', '旁白'];
     case '街訪問答':
       return ['訪問者', '路人', '旁白'];
-    case '主持人加來賓':
-      return ['主持人', '來賓'];
-    case '客戶情境劇':
-      return ['品牌主', '朋友', '藏鏡人'];
-    case '前後對比短劇':
-      return ['改變前', '改變後', '旁白'];
+    case '一人分飾兩角':
+      return ['理性版', '焦慮版'];
+    case '情境短劇':
+      return ['品牌主', '觀眾', '藏鏡人'];
+    case '老闆藏鏡人拆解':
+      return ['老闆', '藏鏡人', '旁白'];
     case '雙人對話':
     default:
       return ['品牌主', '藏鏡人'];
   }
 }
 
-function qualityEntries(check?: ScriptParams extends never ? never : any) {
+function qualityEntries(check?: any) {
   if (!check) return [];
   return [
     ['開場鉤子', check.hook],
     ['角色互動 / 衝突', check.interaction],
     ['CTA 是否明確', check.cta],
     ['是否可拍攝', check.shootability],
-    ['風險檢查', check.risk],
+    ['禁語與誇大風險', check.risk],
   ];
 }
 
@@ -60,6 +51,7 @@ export const ScriptWorkbenchView: React.FC = () => {
     durationSeconds: 30,
     tones: persona?.tones?.length ? persona.tones : ['自然口語'],
     roles: defaultRolesForStyle('雙人對話'),
+    usePublicResearch: false,
   });
   const [isGenerating, setIsGenerating] = useState(false);
   const [rewritingId, setRewritingId] = useState<string | null>(null);
@@ -86,21 +78,27 @@ export const ScriptWorkbenchView: React.FC = () => {
   };
 
   const updateRoles = (value: string) => {
-    const roles = value.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean);
+    const roles = value.split(/[、,\n]/).map((item) => item.trim()).filter(Boolean);
     setParams((prev) => ({ ...prev, roles }));
   };
 
   const handleGenerate = async () => {
     setIsGenerating(true);
-    await generateScript(params);
-    setIsGenerating(false);
+    try {
+      await generateScript(params);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleRewrite = async (action: string) => {
     if (!currentScript) return;
     setRewritingId(action);
-    await rewriteScript(currentScript.id, action);
-    setRewritingId(null);
+    try {
+      await rewriteScript(currentScript.id, action);
+    } finally {
+      setRewritingId(null);
+    }
   };
 
   const handleAddMemory = async () => {
@@ -117,18 +115,19 @@ export const ScriptWorkbenchView: React.FC = () => {
       <header className="view-header flow-header">
         <div>
           <h1 className="view-title">IE程 產出工作台</h1>
-          <p className="view-subtitle">先判斷 workspace 文字資料，再輸出可拍攝腳本、角色互動、品質檢查與引用來源。</p>
+          <p className="view-subtitle">先用 workspace 品牌資料抓事實，再可選擇公開資訊補市場現況、受眾與熱門內容角度。</p>
         </div>
         <div className="flow-pills">
           <span>1 人設</span>
           <span>2 學習</span>
-          <span className="active">3 操盤</span>
+          <span className="active">3 產出</span>
         </div>
       </header>
 
       <div className="view-content workbench-layout">
         <aside className="card workbench-controls">
           <h2 className="card-header">產出條件</h2>
+
           <div className="form-group">
             <label className="form-label"><FileText size={14} /> 平台</label>
             <select className="input-field" value={params.platform} onChange={(event) => setParams({ ...params, platform: event.target.value })}>
@@ -148,13 +147,13 @@ export const ScriptWorkbenchView: React.FC = () => {
             <select className="input-field" value={params.scriptStyle} onChange={(event) => updateScriptStyle(event.target.value)}>
               {SCRIPT_STYLE_OPTIONS.map((style) => <option key={style}>{style}</option>)}
             </select>
-            <p className="field-hint">多人腳本會依角色設定輸出台詞，不只是一人口播。</p>
+            <p className="field-hint">多人腳本會強制使用角色互動，不會只給單人口播。</p>
           </div>
 
           <div className="form-group">
             <label className="form-label"><Users size={14} /> 角色設定</label>
             <input className="input-field" value={roleText} onChange={(event) => updateRoles(event.target.value)} />
-            <p className="field-hint">可用頓號或逗號分隔，例如：主持人、客戶、藏鏡人。</p>
+            <p className="field-hint">可用頓號或逗號分隔，例如：品牌主、藏鏡人、客戶。</p>
           </div>
 
           <div className="form-group">
@@ -176,6 +175,18 @@ export const ScriptWorkbenchView: React.FC = () => {
             </div>
           </div>
 
+          <div className="form-group">
+            <label className="form-label"><Globe2 size={14} /> 公開資訊輔助</label>
+            <button
+              className={`choice-chip ${params.usePublicResearch ? 'selected' : ''}`}
+              type="button"
+              onClick={() => setParams((prev) => ({ ...prev, usePublicResearch: !prev.usePublicResearch }))}
+            >
+              {params.usePublicResearch ? '已啟用公開產業查詢' : '不查公開資訊'}
+            </button>
+            <p className="field-hint">開啟後只查公開資訊，補產業現況、受眾訊號與熱門內容角度；品牌事實仍以 workspace 資料為主。</p>
+          </div>
+
           <button className="btn btn-primary full-width" onClick={handleGenerate} disabled={isGenerating}>
             {isGenerating ? <RefreshCw size={16} className="animate-spin" /> : <Wand2 size={16} />}
             {isGenerating ? 'IE程 產出中...' : '讓 IE程 產出'}
@@ -187,7 +198,7 @@ export const ScriptWorkbenchView: React.FC = () => {
             <div className="card empty-state">
               <div className="preflight-grid">
                 <div className="preflight-item complete">人設：{persona?.brandName}</div>
-                <div className={`preflight-item ${learnedUrls.length > 0 ? 'complete' : ''}`}>Workspace 知識：{learnedUrls.length} 份</div>
+                <div className={`preflight-item ${learnedUrls.length > 0 ? 'complete' : ''}`}>Workspace 學習：{learnedUrls.length} 份</div>
                 <div className="preflight-item complete">角色：{roleText}</div>
               </div>
               <MessageSquare size={40} />
@@ -207,17 +218,28 @@ export const ScriptWorkbenchView: React.FC = () => {
                 </div>
                 <div className="card hermes-brief-card">
                   <div className="section-label">可用素材</div>
-                  <p>{currentScript.usableMaterials || '已從 workspace 知識整理可用素材。'}</p>
+                  <p>{currentScript.usableMaterials || '已從 workspace 學習資料整理可用素材。'}</p>
                 </div>
                 <div className="card hermes-brief-card">
-                  <div className="section-label">缺少資訊</div>
-                  <p>{currentScript.missingInfo || '目前沒有偵測到必須補充的資訊。'}</p>
+                  <div className="section-label">缺少資料</div>
+                  <p>{currentScript.missingInfo || '目前沒有明顯缺口。'}</p>
                 </div>
                 <div className="card hermes-brief-card">
-                  <div className="section-label"><ShieldCheck size={14} /> 安全邊界</div>
-                  <p>{currentScript.safetyCheck || '未查 URL、未使用外部資料、未污染 Core。'}</p>
+                  <div className="section-label"><ShieldCheck size={14} /> 安全檢查</div>
+                  <p>{currentScript.safetyCheck || '未加入未提供的成效保證。'}</p>
                 </div>
               </div>
+
+              {currentScript.publicResearch && (
+                <div className="card quality-card">
+                  <div className="section-label"><Globe2 size={14} /> 公開資訊輔助</div>
+                  <p>{currentScript.publicResearch.industrySnapshot || '已查詢公開產業資訊。'}</p>
+                  <div className="chip-row">
+                    {(currentScript.publicResearch.audienceSignals || []).slice(0, 4).map((item) => <span className="badge" key={item}>{item}</span>)}
+                    {(currentScript.publicResearch.popularAngles || []).slice(0, 4).map((item) => <span className="badge" key={item}>{item}</span>)}
+                  </div>
+                </div>
+              )}
 
               {qualityList.length > 0 && (
                 <div className="card quality-card">

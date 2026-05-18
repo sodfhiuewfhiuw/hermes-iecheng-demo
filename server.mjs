@@ -3,6 +3,7 @@ import http from 'node:http';
 const PORT = Number(process.env.HERMES_AI_SERVER_PORT || 8787);
 const OPENAI_API_KEY = (process.env.OPENAI_API_KEY || '').match(/sk-[A-Za-z0-9_-]+/)?.[0] || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
+const OPENAI_SEARCH_MODEL = process.env.OPENAI_SEARCH_MODEL || OPENAI_MODEL;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'http://127.0.0.1:5173',
@@ -11,16 +12,14 @@ const corsHeaders = {
 };
 
 const HERMES_SYSTEM = [
-  '你是 IE程，HERMES 短影音藏鏡人版本。',
-  '你的工作不是當一般文案機器，而是像短影音操盤者一樣先判斷：觀眾為什麼會停、為什麼會信、為什麼會私訊或行動。',
-  '你說話可以直接、有判斷、有一點犀利，但不要浮誇、不要油、不要裝熟。',
-  '你只使用使用者提供的文字、workspace 已學習資料、人設設定、CTA 設定、禁語與手動記憶。',
-  '不可主動查 URL、不可開網站、不可搜尋外部資料、不可使用其他 workspace、不可揭露 secrets、不可修改 core。',
-  '缺資料時要明確指出缺什麼，但仍要用現有資料做出可拍攝的保守版本。',
-  '不要虛構價格、案例、成效、保證、名人背書或不存在的引用。',
-  '短影音腳本必須可拍：每段要有畫面、角色、台詞、節奏目的；多人腳本要有互動、反問、阻力或衝突。',
-  '避免空話，例如「提升品牌價值」「打造優質內容」這種沒有畫面的句子；要改成觀眾聽得懂、拍得出來的生活語言。',
-  '所有使用者看得到的內容都使用繁體中文、台灣用語。',
+  'You are IE Cheng, the HERMES short-video operator version.',
+  'You are not a generic copywriter. Think like a short-video strategist: why will viewers stop, trust, interact, and act?',
+  'Use Traditional Chinese for Taiwan in every user-facing field.',
+  'Use workspace text as brand facts. Use public web research only as market context when explicitly provided.',
+  'Do not invent prices, case studies, guarantees, claims, or citations.',
+  'For short-video scripts, every block must be shootable: time, speaker, visual direction, and spoken line.',
+  'For multi-person scripts, create real interaction: question, objection, misunderstanding, conflict, or response.',
+  'Do not browse URLs by yourself in normal text-learning mode. Only the controlled public-research step may use web search.',
 ].join('\n');
 
 function sendJson(res, status, data) {
@@ -33,43 +32,6 @@ async function readJson(req) {
   for await (const chunk of req) chunks.push(chunk);
   const raw = Buffer.concat(chunks).toString('utf8');
   return raw ? JSON.parse(raw) : {};
-}
-
-async function askModel(system, user, fallback) {
-  if (!OPENAI_API_KEY) return fallback;
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      temperature: 0.72,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: `${HERMES_SYSTEM}\n${system}\n只回傳 valid JSON，不要 Markdown，不要解釋 JSON 以外的內容。` },
-        { role: 'user', content: user },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenAI API error ${response.status}: ${text}`);
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-  return content ? JSON.parse(content) : fallback;
-}
-
-function splitLines(value) {
-  return String(value || '')
-    .split(/\r?\n|、|,/)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function fallbackCta(persona) {
@@ -118,19 +80,23 @@ function fallbackLearning(persona, input) {
   };
 }
 
-function fallbackScript(persona, params, learnedTexts, memories = []) {
+function fallbackScript(persona, params, learnedTexts, memories = [], publicResearch = null) {
   const duration = Number(params?.durationSeconds || 30);
   const step = Math.max(2, Math.round(duration / 5));
   const citation = learnedTexts?.[0]?.painPoints || '此內容根據本次對話生成，未引用既有知識庫。';
   const roles = params?.roles?.length ? params.roles : ['品牌主', '藏鏡人'];
   const cta = persona?.ctaMethod || [persona?.ctaGoal, persona?.ctaKeyword ? `關鍵字「${persona.ctaKeyword}」` : '', persona?.ctaStrength].filter(Boolean).join('，') || '歡迎私訊了解';
+  const marketLine = publicResearch?.industrySnapshot
+    ? `公開資訊補充：${publicResearch.industrySnapshot}`
+    : '未啟用公開產業資訊查詢，本次以 workspace 資料與人設為主。';
 
   return {
-    hermesJudgement: `IE程判斷：這支不能只做介紹，要先戳中觀眾「我是不是也卡在這裡」的感覺，再用 ${params?.scriptStyle || '雙人對話'} 把問題講清楚。`,
+    hermesJudgement: `IE程判斷：這支不能只做介紹，要先戳中觀眾「我是不是也卡在這裡」的感覺，再用 ${params?.scriptStyle || '雙人對話'} 把問題講清楚。${marketLine}`,
     usableMaterials: learnedTexts?.[0]?.highlights || '目前可用資料偏少，先用人設、受眾、CTA 與已輸入內容做保守腳本。',
     missingInfo: '若要更像真實操盤腳本，建議補充：實際案例、常見客戶問題、服務流程、報價邊界、拍攝場景。',
-    safetyCheck: `已避開禁語與誇大承諾，並帶入 ${memories.length} 筆 workspace 手動記憶。`,
-    citations: [citation],
+    safetyCheck: `已避開禁語與誇大承諾，並帶入 ${memories.length} 筆 workspace 手動記憶。公開資訊只作市場參考，不改寫品牌事實。`,
+    citations: publicResearch?.sources?.length ? [citation, ...publicResearch.sources] : [citation],
+    publicResearch,
     qualityCheck: {
       hook: '通過：開場直接點出觀眾可能卡住的問題。',
       interaction: roles.length > 1 ? '通過：已使用角色對話製造提問與回應。' : '需補強：單人口播可以再增加反問節奏。',
@@ -161,7 +127,7 @@ function fallbackScript(persona, params, learnedTexts, memories = []) {
         time: `${step * 3}-${step * 4} 秒`,
         speaker: roles[1] || roles[0],
         visual: '白板上出現一條腳本動線：問題、誤解、解法、行動。',
-        audio: 'IE程會先讀你提供的資料，再幫你拆成可拍的段落，不亂查、不亂編，也不硬塞沒有根據的承諾。',
+        audio: 'IE程會先讀你提供的資料，再用公開資訊補市場現況，但不會把網路資料亂講成你的品牌承諾。',
       },
       {
         time: `${step * 4}-${duration} 秒`,
@@ -184,6 +150,130 @@ function fallbackRewrite(script, action) {
   };
 }
 
+async function askModel(system, user, fallback) {
+  if (!OPENAI_API_KEY) return fallback;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      temperature: 0.72,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: `${HERMES_SYSTEM}\n${system}\n只回傳 valid JSON，不要 Markdown，不要解釋 JSON 以外的內容。` },
+        { role: 'user', content: user },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`OpenAI API error ${response.status}: ${text}`);
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+  return content ? JSON.parse(content) : fallback;
+}
+
+function extractOutputText(data) {
+  if (typeof data?.output_text === 'string') return data.output_text;
+  const parts = [];
+  for (const item of data?.output || []) {
+    for (const content of item?.content || []) {
+      if (typeof content?.text === 'string') parts.push(content.text);
+    }
+  }
+  return parts.join('\n');
+}
+
+function extractWebSources(data) {
+  const sources = [];
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value.url === 'string' && /^https?:\/\//.test(value.url)) sources.push(value.title ? `${value.title}: ${value.url}` : value.url);
+    Object.values(value).forEach(visit);
+  };
+  visit(data?.output);
+  return Array.from(new Set(sources)).slice(0, 8);
+}
+
+async function researchPublicMarket(body) {
+  if (!OPENAI_API_KEY || !body?.params?.usePublicResearch) return null;
+
+  const persona = body.persona || {};
+  const params = body.params || {};
+  const prompt = [
+    'Use public web search to research current market context for short-video planning.',
+    'Research only public information. Do not search private customer data.',
+    'Focus on industry status, audience signals, popular content angles, platform behavior, and risk notes.',
+    'Do not make brand-specific claims unless they are provided in the input.',
+    'Return every field in Traditional Chinese for Taiwan.',
+    'Return compact JSON only with this shape:',
+    '{"industrySnapshot":"","audienceSignals":[""],"popularAngles":[""],"platformNotes":[""],"riskNotes":[""],"sources":[""]}',
+    '',
+    `Brand: ${persona.brandName || ''}`,
+    `Industry: ${persona.industry || ''}`,
+    `Audience: ${persona.audience || ''}`,
+    `Platforms: ${(persona.platforms || []).join(', ')} / ${params.platform || ''}`,
+    `Purpose: ${params.purpose || ''}`,
+  ].join('\n');
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: OPENAI_SEARCH_MODEL,
+        tools: [{ type: 'web_search' }],
+        tool_choice: 'auto',
+        include: ['web_search_call.action.sources'],
+        input: prompt,
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return {
+        industrySnapshot: '公開資訊查詢失敗，本次改用 workspace 資料與人設判斷。',
+        audienceSignals: [],
+        popularAngles: [],
+        platformNotes: [],
+        riskNotes: [`web_search_error: ${response.status} ${text.slice(0, 160)}`],
+        sources: [],
+      };
+    }
+
+    const data = await response.json();
+    const raw = extractOutputText(data);
+    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+    const sources = Array.from(new Set([...(parsed.sources || []), ...extractWebSources(data)]))
+      .filter((source) => typeof source === 'string' && /^https?:\/\//.test(source.replace(/^.*?:\s*/, '')))
+      .slice(0, 8);
+    return { ...parsed, sources };
+  } catch (error) {
+    return {
+      industrySnapshot: '公開資訊查詢失敗，本次改用 workspace 資料與人設判斷。',
+      audienceSignals: [],
+      popularAngles: [],
+      platformNotes: [],
+      riskNotes: [error instanceof Error ? error.message : String(error)],
+      sources: [],
+    };
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'OPTIONS') {
@@ -196,8 +286,9 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, {
         aiConnected: Boolean(OPENAI_API_KEY),
         model: OPENAI_MODEL,
+        searchModel: OPENAI_SEARCH_MODEL,
         mode: OPENAI_API_KEY ? 'real-openai' : 'mock-fallback',
-        policy: 'iecheng-workspace-text-learning-no-url-fetch',
+        policy: 'workspace-facts-plus-optional-public-research',
       });
       return;
     }
@@ -211,12 +302,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.url === '/api/suggest-cta') {
       const result = await askModel(
-        [
-          '依照人設產生 3 個 CTA 建議。',
-          'CTA 要像 IE程短影音藏鏡人的語氣：具體、可行、不誇大。',
-          '尊重 ctaGoal、ctaKeyword、ctaStrength、ctaNote。',
-          '不可編造優惠、價格、保證或不存在的服務。',
-        ].join('\n'),
+        '依照人設產生 3 個 CTA 建議。CTA 要具體、可行、不誇大。尊重 ctaGoal、ctaKeyword、ctaStrength、ctaNote。',
         `回傳 {"suggestions":["..."]}。\n${JSON.stringify(body.persona)}`,
         fallbackCta(body.persona),
       );
@@ -236,11 +322,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.url === '/api/learn-text' || req.url === '/api/learn-url') {
       const result = await askModel(
-        [
-          '進入文本學習模式，只能使用 input.text。',
-          '如果 input 只有 URL，不可自行開啟網頁，請要求使用者貼上實際文字。',
-          '整理時要保留事實、限制、專有名詞、可用話術與可拍素材。',
-        ].join('\n'),
+        '文本學習模式，只能使用 input.text。如果 input 只有 URL，不可自行開啟網頁，請要求使用者貼上實際文字。',
         `回傳 {"id":"","background":"","highlights":"","audience":"","painPoints":"","topics":"","sellingPoints":"","sourceText":""}.
 background = 3 到 5 點學習摘要。
 highlights = 可用於文稿與短影音的素材。
@@ -255,29 +337,34 @@ ${JSON.stringify(body)}`,
       return;
     }
 
+    if (req.url === '/api/public-research') {
+      const result = await researchPublicMarket({ ...body, params: { ...(body.params || {}), usePublicResearch: true } });
+      sendJson(res, 200, result || { industrySnapshot: '未啟用公開資訊查詢。', sources: [] });
+      return;
+    }
+
     if (req.url === '/api/scripts') {
+      const publicResearch = await researchPublicMarket(body);
       const result = await askModel(
         [
           '你現在是 IE程短影音藏鏡人，不是一般文案產生器。',
-          '生成前先做操盤判斷：這支影片的觀眾停留理由、信任理由、互動衝突、行動理由是什麼。',
-          '使用 params.roles 作為 speaker，而且 speaker 必須逐字等於 params.roles 其中一個值；不要輸出「???」「角色A」「角色B」或自己改名。',
-          '嚴格遵守 params.scriptStyle。若不是單人口播，每段都必須有對話、提問、反駁、誤解或回應。',
-          '優先使用 cta.goal、cta.keyword、cta.strength、cta.note、cta.finalText 作為結尾行動。',
-          '輸出前檢查 forbiddenWords，不可出現禁語、誇大承諾或未提供的成效保證。',
-          '只能使用 learnedUrls、persona、memories、params 裡的資料，不得補外部事實。',
-          '只要 persona、cta、learnedUrls、memories 或 params 欄位不是空字串，就視為有效資料；不要把 demo seed、測試資料或短句直接判定成占位符。',
-          '輸出 5 段，每段都要有 time、speaker、visual、audio。',
-          'visual 要是拍攝指令，不是抽象形容；audio 要是角色真正會講出口的台詞。',
-          'citations 必須直接使用 learnedUrls 裡的 painPoints/source citation 字串；如果沒有 learnedUrls，才寫「此內容根據本次對話生成，未引用既有知識庫。」',
-          'hermesJudgement 要像藏鏡人判斷：直接指出這支影片該打哪個痛點、哪個開場不要用、觀眾為什麼會繼續看。',
-          'qualityCheck 包含 hook、interaction、cta、shootability、risk，值必須以「通過：」「需補強：」或「風險：」開頭。',
-          '如果資料不足，要在 missingInfo 明說，但 blocks 仍要提供保守可拍版本。',
+          'workspace learned text is the source of brand facts.',
+          'publicResearch, if present, is only market context for industry status, audience, and content angles.',
+          'Never turn public market context into brand-specific proof, guarantee, case, price, or claim.',
+          'Use params.roles exactly as speaker names. Speaker must equal one of params.roles.',
+          'If scriptStyle is not one-person narration, every block must include interaction, objection, question, or response.',
+          'Use cta.goal, cta.keyword, cta.strength, cta.note, cta.finalText as the preferred ending.',
+          'Check forbiddenWords before finalizing.',
+          'Output 5 blocks with time, speaker, visual, audio.',
+          'visual must be shootable direction. audio must be real spoken dialogue.',
+          'citations must include workspace citation strings and publicResearch.sources if used.',
+          'qualityCheck values must start with 「通過：」「需補強：」or「風險：」.',
         ].join('\n'),
-        `回傳 {"hermesJudgement":"","usableMaterials":"","missingInfo":"","safetyCheck":"","citations":["..."],"qualityCheck":{"hook":"","interaction":"","cta":"","shootability":"","risk":""},"blocks":[{"time":"","speaker":"","visual":"","audio":""}]}.
-${JSON.stringify(body)}`,
-        fallbackScript(body.persona, body.params, body.learnedUrls, body.memories),
+        `回傳 {"hermesJudgement":"","usableMaterials":"","missingInfo":"","safetyCheck":"","citations":["..."],"publicResearch":null,"qualityCheck":{"hook":"","interaction":"","cta":"","shootability":"","risk":""},"blocks":[{"time":"","speaker":"","visual":"","audio":""}]}.
+${JSON.stringify({ ...body, publicResearch })}`,
+        fallbackScript(body.persona, body.params, body.learnedUrls, body.memories, publicResearch),
       );
-      sendJson(res, 200, result);
+      sendJson(res, 200, { ...result, publicResearch: result.publicResearch || publicResearch });
       return;
     }
 
@@ -299,7 +386,8 @@ ${JSON.stringify(body)}`,
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`IE程 AI server listening on http://127.0.0.1:${PORT}`);
+  console.log(`IE Cheng AI server listening on http://127.0.0.1:${PORT}`);
   console.log(`AI mode: ${OPENAI_API_KEY ? `real-openai (${OPENAI_MODEL})` : 'mock-fallback'}`);
-  console.log('Policy: IE程 workspace text learning, no URL fetch');
+  console.log(`Search model: ${OPENAI_SEARCH_MODEL}`);
+  console.log('Policy: workspace facts plus optional public research');
 });
