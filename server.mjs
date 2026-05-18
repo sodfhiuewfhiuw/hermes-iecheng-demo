@@ -1,4 +1,23 @@
 import http from 'node:http';
+import fs from 'node:fs';
+
+function loadLocalEnv() {
+  for (const fileName of ['.env.local', '.env']) {
+    if (!fs.existsSync(fileName)) continue;
+    const raw = fs.readFileSync(fileName, 'utf8');
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (!match) continue;
+      const [, key, value] = match;
+      if (process.env[key]) continue;
+      process.env[key] = value.replace(/^['"]|['"]$/g, '').trim();
+    }
+  }
+}
+
+loadLocalEnv();
 
 const PORT = Number(process.env.HERMES_AI_SERVER_PORT || 8787);
 const OPENAI_API_KEY = (process.env.OPENAI_API_KEY || '').match(/sk-[A-Za-z0-9_-]+/)?.[0] || '';
@@ -230,47 +249,94 @@ function buildFallbackScript(persona = {}, params = {}, learnedTexts = [], memor
   const roles = params.roles?.length ? params.roles : ['品牌主', '藏鏡人'];
   const lead = roles[0] || '品牌主';
   const mirror = roles[1] || '藏鏡人';
+  const third = roles[2] || '旁白';
+  const brand = persona.brandName || '這個品牌';
+  const industry = persona.industry || '這個產業';
+  const audience = persona.audience || '目標受眾';
+  const purpose = params.purpose || '建立信任';
+  const style = params.scriptStyle || '雙人對話';
+  const toneText = [...(persona.tones || []), ...(params.tones || [])].filter(Boolean).join('、') || '台灣口語';
+  const learned = learnedTexts?.[0]?.highlights || learnedTexts?.[0]?.background || '目前提供的資料還不多，所以要先從現場痛點切入。';
+  const memoryText = memories?.map((item) => item.content).filter(Boolean).slice(0, 2).join('；');
   const cta = persona.ctaMethod || `想看你的短影音可以怎麼拍，私訊「${persona.ctaKeyword || '腳本'}」，我先幫你抓第一版。`;
   const citation = learnedTexts?.[0]?.painPoints || '此內容根據本次對話生成，未引用既有知識庫。';
+  const isSoft = /溫柔|生活|信任|房仲|親子/.test(`${toneText}${industry}`);
+  const isFoodOrLocal = /餐飲|店家|攤|小吃|雞排|在地|靠北/.test(`${toneText}${industry}${brand}`);
+  const isProfessional = /哥們|專業|操盤|行銷|短影音|犀利/.test(`${toneText}${industry}`);
+
+  const opening = isFoodOrLocal
+    ? `不是啊，很多人看 ${brand} 只看到價格，沒看到後面那些成本。`
+    : isSoft
+      ? `你不是不會選，只是第一次面對 ${industry}，真的會怕自己判斷錯。`
+      : isProfessional
+        ? `我跟你講，${brand} 現在不是沒內容，是還沒把重點變成觀眾聽得懂的那句。`
+        : `你看喔，${brand} 現在卡住的不是資料，是觀眾第一秒為什麼要停下來。`;
+
+  const innerOs = isFoodOrLocal
+    ? '你以為我很閒喔，成本每天都在動。'
+    : isSoft
+      ? '他其實不是不想決定，是怕一決定就錯。'
+      : isProfessional
+        ? '這樣拍十支也只是把資料念完，觀眾不會有感。'
+        : '這句太像報告了，現場的人不會這樣講。';
+
+  const mouthLine = isFoodOrLocal
+    ? '我先跟你講為什麼會變這樣。'
+    : isSoft
+      ? '我們先不要急著決定，先把你真正擔心的地方攤開來看。'
+      : isProfessional
+        ? '我們先把觀眾會停下來的那句抓出來。'
+        : '我先幫你整理成能拍的版本。';
+
+  const conflict = isFoodOrLocal
+    ? '客人以為只是漲價，老闆其實是在撐成本、品質和現場壓力。'
+    : isSoft
+      ? `${audience} 最怕的不是資訊少，是資訊太多卻不知道哪個才重要。`
+      : `${brand} 有資料，但如果沒有衝突、角色和真人句，就會變成一支公告。`;
+
+  const thirdBlock = style.includes('三人')
+    ? { time: `${step * 2}-${step * 3} 秒`, speaker: third, visual: `${third} 把問題寫在白板上，讓兩邊都看見同一個卡點。`, audio: `所以現在不是誰對誰錯，是 ${audience} 到底卡在哪一個判斷。` }
+    : { time: `${step * 2}-${step * 3} 秒`, speaker: mirror, visual: `${mirror} 圈出一句真人句，旁邊浮出「觀眾會停下來的句子」。`, audio: `所以問題不是要講更多，是要先講 ${audience} 真的會在意的那一句。` };
 
   return {
-    hermesJudgement: '目前先用 HERMES 小房間 fallback 產出：有模擬、有真人句、有心裡 OS，但正式測試仍建議確認 API server 是否已連線。',
-    usableMaterials: learnedTexts?.[0]?.highlights || '目前 workspace 資料較少，腳本會用人設、CTA、禁語與已輸入記憶保守生成。',
-    missingInfo: '若要更像真人，需要補：真實客戶問法、過去對話、老闆原話、常被誤解的地方、實際拍攝場景。',
+    hermesJudgement: `目前是本地 fallback，已依 ${brand} / ${industry} / ${purpose} 產出差異化草稿。正式測試仍建議接上 real AI。`,
+    usableMaterials: `這次可用素材：${learned}${memoryText ? `；額外記憶：${memoryText}` : ''}`,
+    missingInfo: `若要更像 TG 小房間，需要補 ${brand} 的真實客戶問法、過去對話、老闆原話、常被誤解的地方與實際拍攝場景。`,
     safetyCheck: `已套用禁語與 CTA。手動記憶 ${memories.length} 筆，只使用目前 workspace。`,
     citations: publicResearch?.sources?.length ? [citation, ...publicResearch.sources] : [citation],
     publicResearch,
     voiceDna: {
-      firstReactionPatterns: ['先停一下', '不是啊，問題是', '我跟你講，這個很多人都搞錯'],
-      mouthLines: ['我先幫你看一下狀況。', '我們先把方向整理一下。'],
-      innerOs: ['你這樣拍十年也不會有流量。', '你根本沒搞懂問題。'],
-      rhythm: '短句、停頓、藏鏡人追問，避免作文句。',
-      signaturePhrases: ['我跟你講', '不是啊', '你心裡不是這樣吧'],
+      firstReactionPatterns: [opening, `啊問題是，${audience} 第一秒聽不懂就滑掉了。`],
+      mouthLines: [mouthLine, `我們先把 ${brand} 最能拍的那個現場抓出來。`],
+      innerOs: [innerOs, '這句如果只是講道理，觀眾不會停。'],
+      rhythm: `${toneText}。短句、停頓、藏鏡人追問，避免作文句。`,
+      signaturePhrases: isSoft ? ['先不要急', '你真正擔心的是', '我們攤開看'] : ['我跟你講', '不是啊', '啊問題是'],
       forbiddenVoice: ['首先其次最後', '打造完整體驗', '有效提升品牌價值'],
       speechConfidence: learnedTexts?.length ? 'medium' : 'low',
     },
     rehearsalPreview: [
-      { speaker: mirror, line: '你第一秒真的這樣想？', innerOs: '他其實不是沒資料，是不知道怎麼變成能拍的東西。', mouthLine: '你先不要急著寫腳本。', purpose: '逼出現場反應' },
-      { speaker: lead, line: '不是啊，我東西很多，但我不知道哪個能拍。', innerOs: '每次都整理到一半就放棄。', mouthLine: '我只是想先有一版方向。', purpose: '抓真人句' },
-      { speaker: mirror, line: '所以你卡的不是拍片，是不知道觀眾到底要聽哪一句。', innerOs: '這句就是主軸。', mouthLine: '那我們先抓觀眾會停下來的那句。', purpose: '轉成故事骨架' },
+      { speaker: mirror, line: '你第一秒真的這樣想？', innerOs, mouthLine: '你先不要急著寫腳本。', purpose: '逼出現場反應' },
+      { speaker: lead, line: opening, innerOs, mouthLine, purpose: '抓真人句' },
+      { speaker: mirror, line: `所以 ${brand} 卡的不是內容，是觀眾還沒有進到那個現場。`, innerOs: '這句就是主軸。', mouthLine: `那我們先抓 ${audience} 會停下來的那句。`, purpose: '轉成故事骨架' },
     ],
     realLines: [
-      '我東西很多，但我不知道哪個能拍。',
-      '你卡的不是拍片，是不知道觀眾到底要聽哪一句。',
-      '先不要寫漂亮，先寫真的會發生的那一幕。',
+      opening,
+      mouthLine,
+      `${brand} 不是沒內容，是還沒變成觀眾聽得懂的現場話。`,
+      `先不要寫漂亮，先寫 ${industry} 真的會發生的那一幕。`,
     ],
     storyBeats: {
-      hook: '用一句現場真話打開，讓觀眾覺得「這不就是我」。',
-      setup: '品牌主手上有資料，但不知道怎麼變成短影音。',
-      conflict: '資料很多，卻沒有角色、畫面、衝突，所以拍出來像公告。',
-      turningPoint: '藏鏡人把資料逼成真人句，再剪成可拍段落。',
+      hook: opening,
+      setup: `${brand} 面對的是 ${audience}，不能只把資料念完。`,
+      conflict,
+      turningPoint: `藏鏡人把 ${industry} 的抽象說明逼成真人句，再剪成可拍段落。`,
       ending: '用客製 CTA 收尾，引導私訊或留下資料。',
     },
     publishPack: {
-      title: '你不是沒內容，是還沒把它變成能拍的話',
-      subtitleFirstLine: '短影音先不要寫漂亮，先寫現場真的會講的那句。',
+      title: `${brand} 不是沒內容，是還沒變成觀眾聽得懂的那句`,
+      subtitleFirstLine: `${industry} 短影音先不要寫漂亮，先寫現場真的會講的話。`,
       cta,
-      hashtags: ['#短影音腳本', '#IE程', '#藏鏡人', '#內容操盤'],
+      hashtags: ['#短影音腳本', '#IE程', `#${industry.replace(/\s+/g, '')}`, '#藏鏡人'],
     },
     qualityCheck: {
       hook: '通過：開頭有第一秒反應，不是教學標題。',
@@ -278,13 +344,13 @@ function buildFallbackScript(persona = {}, params = {}, learnedTexts = [], memor
       cta: cta ? '通過：已使用使用者設定 CTA。' : '需補強：CTA 還不夠明確。',
       shootability: '通過：每段都有畫面、角色與台詞方向。',
       risk: '通過：未加入未提供的成效保證。',
-      humanSpeech: '需補強：fallback 版本有人味結構，但仍需真實客戶原話提高 voice_dna 信心。',
+      humanSpeech: `需補強：fallback 已依 ${industry} 做差異化，但仍需真實客戶原話提高 voice_dna 信心。`,
     },
     blocks: [
-      { time: `0-${step} 秒`, speaker: mirror, visual: '藏鏡人在鏡頭外打斷，畫面是品牌主看著一堆資料。', audio: '你先不要急著寫腳本。你第一秒真正想講的是哪一句？' },
-      { time: `${step}-${step * 2} 秒`, speaker: lead, visual: '品牌主把文件攤開，表情有點煩。', audio: '不是啊，我東西很多，但我不知道哪個能拍。' },
-      { time: `${step * 2}-${step * 3} 秒`, speaker: mirror, visual: '藏鏡人圈出一句話，旁邊浮出「觀眾會停下來的句子」。', audio: '所以你卡的不是拍片，是不知道觀眾到底要聽哪一句。' },
-      { time: `${step * 3}-${step * 4} 秒`, speaker: lead, visual: '文件變成分鏡卡：鉤子、衝突、轉折、CTA。', audio: '先不要寫漂亮，先寫真的會發生的那一幕。' },
+      { time: `0-${step} 秒`, speaker: mirror, visual: `藏鏡人在鏡頭外打斷，畫面是 ${lead} 面對一堆 ${industry} 資料。`, audio: `先等一下。${brand} 第一秒真正要讓觀眾聽到的是哪一句？` },
+      { time: `${step}-${step * 2} 秒`, speaker: lead, visual: `${lead} 把資料攤開，表情像是終於講出真話。`, audio: opening },
+      thirdBlock,
+      { time: `${step * 3}-${step * 4} 秒`, speaker: lead, visual: `畫面切成分鏡卡：鉤子、衝突、轉折、CTA。`, audio: mouthLine },
       { time: `${step * 4}-${duration} 秒`, speaker: mirror, visual: '手機畫面出現私訊按鈕與腳本草稿。', audio: cta },
     ],
   };
